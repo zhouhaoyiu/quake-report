@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily USGS M>=3 earthquake catalog sync
+
+[Timer]
+OnBootSec=20min
+OnCalendar=*-*-* 04:20:00
+RandomizedDelaySec=30min
+Persistent=true
+Unit=quake-report-usgs-sync.service
+
+[Install]
+WantedBy=timers.target

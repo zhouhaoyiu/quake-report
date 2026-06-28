@@ -1,0 +1,6 @@
+[Unit]
+Description=Clean stale quake report temporary files
+
+[Service]
+Type=oneshot
+ExecStart=/opt/quake-report/next-service-dist/scripts/cleanup_tmp_reports.sh

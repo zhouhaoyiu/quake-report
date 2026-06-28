@@ -1,0 +1,10 @@
+[Unit]
+Description=Run quake report temporary file cleanup
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=30min
+Unit=quake-report-cleanup.service
+
+[Install]
+WantedBy=timers.target

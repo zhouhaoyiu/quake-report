@@ -1,0 +1,12 @@
+[Unit]
+Description=Sync USGS M>=3 earthquake catalog cache
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+TimeoutStartSec=8h
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+ExecStart=/opt/quake-python/env/bin/python /opt/quake-report/next-service-dist/scripts/sync_usgs_catalog.py --db /opt/quake-report-cache/usgs_catalog.sqlite --status-json /opt/quake-report-cache/usgs_catalog_status.json --min-mag 3 --full-if-empty
