@@ -18,6 +18,7 @@ from pathlib import Path
 FDSN = "https://earthquake.usgs.gov/fdsnws/event/1"
 DEFAULT_DB = Path("var/usgs_catalog.sqlite")
 DEFAULT_LIMIT = 20000
+FTS_SCHEMA_VERSION = "1"
 CSV_COLUMNS = [
     "time", "latitude", "longitude", "depth", "mag", "magType", "nst", "gap",
     "dmin", "rms", "net", "id", "updated", "place", "type", "horizontalError",
@@ -123,6 +124,43 @@ def init_db(conn: sqlite3.Connection) -> None:
     conn.execute("create index if not exists idx_events_time on events(time)")
     conn.execute("create index if not exists idx_events_mag on events(mag)")
     conn.execute("create index if not exists idx_events_lat_lon on events(latitude, longitude)")
+    conn.execute("create index if not exists idx_events_mag_time on events(mag, time)")
+    conn.execute("create index if not exists idx_events_time_mag on events(time, mag)")
+    conn.execute("create index if not exists idx_events_lat_lon_mag_time on events(latitude, longitude, mag, time)")
+    init_fts(conn)
+
+
+def init_fts(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        create virtual table if not exists events_fts using fts5(
+            id,
+            place,
+            content='events',
+            content_rowid='rowid'
+        )
+    """)
+    conn.executescript("""
+        create trigger if not exists events_ai after insert on events begin
+            insert into events_fts(rowid, id, place) values (new.rowid, new.id, coalesce(new.place, ''));
+        end;
+        create trigger if not exists events_ad after delete on events begin
+            insert into events_fts(events_fts, rowid, id, place)
+            values('delete', old.rowid, old.id, coalesce(old.place, ''));
+        end;
+        create trigger if not exists events_au after update on events begin
+            insert into events_fts(events_fts, rowid, id, place)
+            values('delete', old.rowid, old.id, coalesce(old.place, ''));
+            insert into events_fts(rowid, id, place) values (new.rowid, new.id, coalesce(new.place, ''));
+        end;
+    """)
+    event_count = conn.execute("select count(*) from events").fetchone()[0]
+    version = conn.execute("select value from meta where key='fts_schema_version'").fetchone()
+    if event_count and (not version or version[0] != FTS_SCHEMA_VERSION):
+        conn.execute("insert into events_fts(events_fts) values('rebuild')")
+    conn.execute(
+        "insert into meta(key, value) values('fts_schema_version', ?) on conflict(key) do update set value=excluded.value",
+        (FTS_SCHEMA_VERSION,),
+    )
 
 
 def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
@@ -253,13 +291,15 @@ def self_check() -> int:
         try:
             init_db(conn)
             upsert_rows(conn, [
-                {"id": "a", "time": "2000-01-01T00:00:00.000Z", "latitude": "1", "longitude": "2", "mag": "3.2"},
-                {"id": "a", "time": "2000-01-01T00:00:00.000Z", "latitude": "1", "longitude": "2", "mag": "3.4"},
-                {"id": "b", "time": "2000-01-02T00:00:00.000Z", "latitude": "3", "longitude": "4", "mag": "5.0"},
+                {"id": "a", "time": "2000-01-01T00:00:00.000Z", "latitude": "1", "longitude": "2", "mag": "3.2", "place": "Sichuan"},
+                {"id": "a", "time": "2000-01-01T00:00:00.000Z", "latitude": "1", "longitude": "2", "mag": "3.4", "place": "Sichuan"},
+                {"id": "b", "time": "2000-01-02T00:00:00.000Z", "latitude": "3", "longitude": "4", "mag": "5.0", "place": "Japan"},
             ])
             count, max_mag = conn.execute("select count(*), max(mag) from events").fetchone()
             assert count == 2, count
             assert abs(max_mag - 5.0) < 1e-9, max_mag
+            fts_count = conn.execute("select count(*) from events_fts where events_fts match 'sichuan'").fetchone()[0]
+            assert fts_count == 1, fts_count
         finally:
             conn.close()
     print("self-check ok")

@@ -1,11 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cachedFetchJson, cachedFetchText } from "@/lib/usgs-cache";
+import { execFile } from "node:child_process";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { promisify } from "node:util";
 
 const FDSN_QUERY = "https://earthquake.usgs.gov/fdsnws/event/1/query";
 const FDSN_COUNT = "https://earthquake.usgs.gov/fdsnws/event/1/count";
 const DETAIL_BASE = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail";
 const PAGE_SIZE = 10;
 const TEXT_CANDIDATE_LIMIT = 500;
+const execFileAsync = promisify(execFile);
+const PYTHON = process.env.PYTHON || "python3";
 
 export async function GET(req: NextRequest) {
   try {
@@ -14,10 +20,15 @@ export async function GET(req: NextRequest) {
     const page = Math.max(1, Number.parseInt(url.searchParams.get("page") || "1", 10) || 1);
     if (q.length < 2) return NextResponse.json({ ok: true, events: [], page, pageSize: PAGE_SIZE, total: 0 });
 
-    const idEvent = await findByEventId(q);
+    const spec = parseQuery(q);
+    const eventId = eventIdFromQuery(q);
+    if (eventId) spec.eventId = eventId;
+    const local = await searchLocalCatalog(spec, page);
+    if (local) return NextResponse.json(local);
+
+    const idEvent = eventId ? await findByEventId(eventId) : null;
     if (idEvent) return NextResponse.json({ ok: true, events: page === 1 ? [idEvent] : [], page, pageSize: PAGE_SIZE, total: 1 });
 
-    const spec = parseQuery(q);
     const params = buildParams(spec);
 
     if (spec.text) {
@@ -56,6 +67,46 @@ export async function GET(req: NextRequest) {
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || String(e) }, { status: 500 });
   }
+}
+
+async function searchLocalCatalog(spec: any, page: number) {
+  const db = await catalogDbPath();
+  if (!db) return null;
+  try {
+    const script = path.join(process.cwd(), "scripts", "search_usgs_catalog.py");
+    const { stdout } = await execFileAsync(PYTHON, [
+      script,
+      "--db",
+      db,
+      "--spec-json",
+      JSON.stringify({ ...spec, page, pageSize: PAGE_SIZE }),
+    ], { timeout: 5000, maxBuffer: 1024 * 1024 });
+    const parsed = JSON.parse(stdout);
+    return parsed?.ok ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+async function catalogDbPath() {
+  const candidates = [
+    process.env.QUAKE_USGS_CATALOG_DB,
+    path.join(process.cwd(), "var", "usgs_catalog.sqlite"),
+    "/opt/quake-report-cache/usgs_catalog.sqlite",
+  ].filter(Boolean) as string[];
+  for (const candidate of candidates) {
+    try {
+      await fs.access(candidate);
+      return candidate;
+    } catch {
+      // try next path
+    }
+  }
+  return null;
+}
+
+function eventIdFromQuery(q: string) {
+  return /^[a-z]{2}\d[\w-]{4,}$/i.test(q) ? q : "";
 }
 
 function buildParams(spec: any) {

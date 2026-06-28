@@ -233,17 +233,6 @@ export default function Home() {
   const queuedEventLabel = mode === "recent" ? "最新" : "目录";
   const mapViewLabel = mapView === "m4" ? "隐藏 M3-M4" : mapView === "time" ? "按时间着色" : "全量按震级";
   const tzLabel = tz === "utc8" ? "北京时间" : tz === "both" ? "UTC+北京时间" : "UTC";
-  const eventConfirmText = useMemo(
-    () =>
-      queuedEvent
-        ? `M${queuedEvent.mag.toFixed(1)} ${queuedEvent.place || queuedEvent.eventId}`
-        : mode === "manual"
-          ? lat && lon && mag
-            ? `M${mag} ${lat}, ${lon}`
-            : "手动事件待填写"
-          : eventId.trim() || "Event ID 待填写",
-    [queuedEvent, mode, lat, lon, mag, eventId]
-  );
   const catalogPageSize = 10;
   const catalogPageCount = Math.max(1, Math.ceil(catalogSearchTotal / catalogPageSize));
   const safeCatalogPage = Math.min(catalogSearchPage, catalogPageCount);
@@ -758,25 +747,23 @@ export default function Home() {
   }
 
   const generationControls = (
-    <div className={`mb-3 rounded-xl border border-[#ded4c6] bg-[#fffdf8] p-3 text-left dark:border-[#3a332c] dark:bg-[#1c1814] ${settingsReady ? "" : "invisible"}`}>
+    <div className="mb-3 rounded-xl border border-[#ded4c6] bg-[#fffdf8] p-3 text-left dark:border-[#3a332c] dark:bg-[#1c1814]">
       {queuedEvent && (
-        <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-[#ded4c6] bg-[#fffaf2] px-3 py-2 text-xs dark:border-[#3a332c] dark:bg-[#211c17]">
-          <span className="text-[#76695d] dark:text-[#b7aa9b]">当前选中，待生成</span>
-          <span className="font-medium text-[#2d241c] dark:text-[#f4eee5]">
-            M{queuedEvent.mag.toFixed(1)} {queuedEvent.place}
-          </span>
-          <Badge variant="outline" className="h-5 bg-[#2d241c] text-[#fff8ee] border-[#2d241c] dark:bg-[#f4eee5] dark:text-[#171411] dark:border-[#f4eee5]">
-            {queuedEventLabel}
-          </Badge>
-          <span className="font-mono text-[#76695d] dark:text-[#b7aa9b]">
-            {queuedEvent.time.slice(0, 16).replace("T", " ")}
-          </span>
-          <span className="font-mono text-[#76695d] dark:text-[#b7aa9b]">
-            {queuedEvent.latitude.toFixed(2)}°, {queuedEvent.longitude.toFixed(2)}°
-          </span>
-          <span className="font-mono text-[#76695d] dark:text-[#b7aa9b]">
-            {queuedEvent.depth.toFixed(1)} km
-          </span>
+        <div className="mb-2 rounded-lg border border-[#ded4c6] bg-[#fffaf2] px-3 py-2 dark:border-[#3a332c] dark:bg-[#211c17]">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-[#76695d] dark:text-[#b7aa9b]">当前选中</span>
+            <span className="font-medium text-[#2d241c] dark:text-[#f4eee5]">
+              M{queuedEvent.mag.toFixed(1)} {queuedEvent.place}
+            </span>
+            <Badge variant="outline" className="h-5 bg-[#2d241c] text-[#fff8ee] border-[#2d241c] dark:bg-[#f4eee5] dark:text-[#171411] dark:border-[#f4eee5]">
+              {queuedEventLabel}
+            </Badge>
+          </div>
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 font-mono text-xs text-[#76695d] dark:text-[#b7aa9b]">
+            <span>{queuedEvent.time.slice(0, 16).replace("T", " ")}</span>
+            <span>{queuedEvent.latitude.toFixed(2)}°, {queuedEvent.longitude.toFixed(2)}°</span>
+            <span>{queuedEvent.depth.toFixed(1)} km</span>
+          </div>
         </div>
       )}
 
@@ -784,7 +771,7 @@ export default function Home() {
         <Globe2 className="w-4 h-4 text-[#5a4b3f] dark:text-[#d8cbbb]" />
         查询与输出参数
       </div>
-      <div className="flex flex-wrap items-end gap-2">
+      <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-[110px_96px_96px_minmax(240px,1fr)_170px]">
         <div className="w-28">
           <Label htmlFor="radius" className="text-xs">查询半径 km</Label>
           <Input id="radius" className="h-8" placeholder="200" value={radiusKm} onChange={(e) => setRadiusKm(e.target.value)} />
@@ -817,6 +804,8 @@ export default function Home() {
             </SelectContent>
           </Select>
         </div>
+      </div>
+      <div className="mt-2 flex flex-wrap items-end gap-2">
         <div className="min-w-[260px] flex-1">
           <Label htmlFor="mapView" className="text-xs">地图显示</Label>
           <div id="mapView" className="grid h-8 grid-cols-3 rounded-md bg-[#efe6d8] p-0.5 text-xs dark:bg-[#2b251f]">
@@ -833,11 +822,11 @@ export default function Home() {
           </div>
         </div>
         <div className="flex h-8 min-w-[132px] items-center justify-between gap-2 rounded-md border border-[#ded4c6] bg-[#fffaf2] px-3 dark:border-[#3a332c] dark:bg-[#211c17]">
-            <Label htmlFor="noPdf" className="text-xs">不生成 PDF</Label>
+            <Label htmlFor="noPdf" className="text-xs">跳过 PDF</Label>
             <Switch id="noPdf" checked={noPdf} onCheckedChange={setNoPdf} />
         </div>
         <div className="flex h-8 min-w-[220px] items-center justify-between gap-2 rounded-md border border-[#ded4c6] bg-[#fffaf2] px-3 dark:border-[#3a332c] dark:bg-[#211c17]">
-            <Label htmlFor="noExtended" className="text-xs">简版报告（保留正文和分布图）</Label>
+            <Label htmlFor="noExtended" className="text-xs">简版报告</Label>
             <Switch id="noExtended" checked={noExtended} onCheckedChange={setNoExtended} />
         </div>
         <Button
@@ -869,17 +858,17 @@ export default function Home() {
           生成报告
         </Button>
       </div>
-      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 rounded-md border border-[#ded4c6] bg-[#fffaf2] px-2 py-1.5 text-xs text-[#76695d] dark:border-[#3a332c] dark:bg-[#211c17] dark:text-[#b7aa9b]">
-        <span>确认：{eventConfirmText}</span>
+      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 rounded-md bg-[#fffaf2] px-2 py-1.5 text-xs text-[#76695d] dark:bg-[#211c17] dark:text-[#b7aa9b]">
+        <span className="font-medium text-[#5a4b3f] dark:text-[#d8cbbb]">当前配置</span>
         <span>半径 {radiusKm || "-"} km</span>
         <span>M≥{minMag || "-"}</span>
         <span>地图：{mapViewLabel}</span>
-        <span>{noPdf ? "不生成 PDF" : "生成 PDF"}</span>
+        <span>{noPdf ? "跳过 PDF" : "生成 PDF"}</span>
         <span>时区：{tzLabel}</span>
         <span>目录量：{catalogCount == null ? "未预估" : `${catalogCount.toLocaleString()} 条`}</span>
       </div>
       <p className="mt-1 text-xs text-[#76695d] dark:text-[#b7aa9b]">
-        图编号用于报告图题；地图隐藏小震只影响图面显示，统计和表格仍使用完整目录。
+        图编号用于报告图题；地图显示只影响图面表达，统计和表格仍使用完整目录。
       </p>
     </div>
   );

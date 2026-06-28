@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cachedFetchJson, cachedFetchText } from "@/lib/usgs-cache";
+import { execFile } from "node:child_process";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { promisify } from "node:util";
 
 const FDSN_BASE = "https://earthquake.usgs.gov/fdsnws/event/1";
 const DETAIL_BASE = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail";
+const execFileAsync = promisify(execFile);
+const PYTHON = process.env.PYTHON || "python3";
 
 export async function POST(req: NextRequest) {
   try {
@@ -14,14 +20,21 @@ export async function POST(req: NextRequest) {
       if (!eventId) {
         return NextResponse.json({ ok: false, error: "缺少 eventId" }, { status: 400 });
       }
-      const detail = await cachedFetchJson(`${DETAIL_BASE}/${eventId}.geojson`, 3600_000);
-      if (detail.status >= 400) {
-        return NextResponse.json({ ok: false, error: "USGS eventid 查询失败" }, { status: 502 });
+      const localEvent = await findLocalEvent(eventId);
+      if (localEvent) {
+        lon = localEvent.longitude;
+        lat = localEvent.latitude;
+        time = localEvent.time;
+      } else {
+        const detail = await cachedFetchJson(`${DETAIL_BASE}/${eventId}.geojson`, 3600_000);
+        if (detail.status >= 400) {
+          return NextResponse.json({ ok: false, error: "USGS eventid 查询失败" }, { status: 502 });
+        }
+        const js = detail.json;
+        lon = js.geometry.coordinates[0];
+        lat = js.geometry.coordinates[1];
+        time = new Date(js.properties.time).toISOString();
       }
-      const js = detail.json;
-      lon = js.geometry.coordinates[0];
-      lat = js.geometry.coordinates[1];
-      time = new Date(js.properties.time).toISOString();
     }
 
     if (lat == null || lon == null || !time) {
@@ -29,6 +42,24 @@ export async function POST(req: NextRequest) {
     }
 
     const end = endTime ? new Date(endTime) : new Date(new Date(time).getTime() - 1000);
+    const localCount = await countLocalCatalog({
+      lat: Number(lat),
+      lon: Number(lon),
+      radiusKm: Number(radiusKm),
+      minMag: Number(minMag),
+      start: (startTime ? new Date(startTime) : new Date(Date.UTC(1900, 0, 1))).toISOString(),
+      end: end.toISOString(),
+    });
+    if (localCount != null) {
+      return NextResponse.json({
+        ok: true,
+        count: localCount,
+        cacheHit: false,
+        localCatalog: true,
+        note: "本地 SQLite 目录预估",
+      });
+    }
+
     const params = new URLSearchParams({
       latitude: String(lat),
       longitude: String(lon),
@@ -50,4 +81,58 @@ export async function POST(req: NextRequest) {
 
 function formatUsgsDate(date: Date) {
   return date.toISOString().replace(/\.\d{3}Z$/, "");
+}
+
+async function countLocalCatalog(spec: any) {
+  const result = await runLocalCatalog({ ...spec, countOnly: true, page: 1, pageSize: 1 });
+  const total = result?.total;
+  return Number.isFinite(total) ? Number(total) : null;
+}
+
+async function findLocalEvent(eventId: string) {
+  const result = await runLocalCatalog({
+    eventId,
+    start: "1900-01-01",
+    end: "2100-01-01",
+    minMag: -10,
+    page: 1,
+    pageSize: 1,
+  });
+  return result?.events?.[0] || null;
+}
+
+async function runLocalCatalog(spec: any) {
+  const db = await catalogDbPath();
+  if (!db) return null;
+  try {
+    const script = path.join(process.cwd(), "scripts", "search_usgs_catalog.py");
+    const { stdout } = await execFileAsync(PYTHON, [
+      script,
+      "--db",
+      db,
+      "--spec-json",
+      JSON.stringify(spec),
+    ], { timeout: 5000, maxBuffer: 1024 * 1024 });
+    const parsed = JSON.parse(stdout);
+    return parsed?.ok && parsed?.localCatalog ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+async function catalogDbPath() {
+  const candidates = [
+    process.env.QUAKE_USGS_CATALOG_DB,
+    path.join(process.cwd(), "var", "usgs_catalog.sqlite"),
+    "/opt/quake-report-cache/usgs_catalog.sqlite",
+  ].filter(Boolean) as string[];
+  for (const candidate of candidates) {
+    try {
+      await fs.access(candidate);
+      return candidate;
+    } catch {
+      // try next path
+    }
+  }
+  return null;
 }

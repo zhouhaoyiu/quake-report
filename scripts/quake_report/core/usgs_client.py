@@ -316,11 +316,15 @@ def fetch_historical_catalog(
 
 
 def _catalog_db_path() -> Optional[Path]:
+    candidates: list[Path] = []
     configured = os.environ.get(_CATALOG_DB_ENV)
     if configured:
-        path = Path(configured)
-        return path if path.exists() else None
-    for candidate in (Path.cwd() / "var" / "usgs_catalog.sqlite",):
+        candidates.append(Path(configured))
+    candidates.extend((
+        Path.cwd() / "var" / "usgs_catalog.sqlite",
+        Path("/opt/quake-report-cache/usgs_catalog.sqlite"),
+    ))
+    for candidate in candidates:
         if candidate.exists():
             return candidate
     return None
