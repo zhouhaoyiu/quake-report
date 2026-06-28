@@ -1065,14 +1065,15 @@ def build_report(
     _add_centered_paragraph(doc, _figure_source_note(stats, radius_km, tz),
                             font_names=FANGSONG_FONT_NAMES, size_pt=7.5, line_pt=11.0)
 
-    chart_num = int(fig_num) + 1 if str(fig_num).isdigit() else 2
-    for chart_path, caption in _make_report_charts(catalog_df, output_docx_path, tz):
-        _add_image_centered(doc, chart_path, width_cm=15.0)
-        _add_centered_paragraph(doc, f"图{chart_num} {caption}",
-                                font_names=FANGSONG_FONT_NAMES, size_pt=9.3, line_pt=15.0)
-        _add_centered_paragraph(doc, _figure_source_note(stats, radius_km, tz),
-                                font_names=FANGSONG_FONT_NAMES, size_pt=7.5, line_pt=11.0)
-        chart_num += 1
+    if include_extended_chapters:
+        chart_num = int(fig_num) + 1 if str(fig_num).isdigit() else 2
+        for chart_path, caption in _make_report_charts(catalog_df, output_docx_path, tz):
+            _add_image_centered(doc, chart_path, width_cm=15.0)
+            _add_centered_paragraph(doc, f"图{chart_num} {caption}",
+                                    font_names=FANGSONG_FONT_NAMES, size_pt=9.3, line_pt=15.0)
+            _add_centered_paragraph(doc, _figure_source_note(stats, radius_km, tz),
+                                    font_names=FANGSONG_FONT_NAMES, size_pt=7.5, line_pt=11.0)
+            chart_num += 1
 
     if include_extended_chapters:
         _add_report_heading(doc, "六、数据质量与口径", level=1)

@@ -273,7 +273,7 @@ def render_distribution_map(
 
     # 保存
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-    fig.savefig(output_path, dpi=dpi, bbox_inches="tight", facecolor="white")
+    fig.savefig(output_path, dpi=dpi, facecolor="white", pil_kwargs={"compress_level": 2})
     plt.close(fig)
     return output_path
 
