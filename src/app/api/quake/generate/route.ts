@@ -37,7 +37,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { spawn } from "child_process";
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import path from "path";
 import os from "os";
 import fsSync from "fs";
@@ -54,6 +54,9 @@ const MIME: Record<string, string> = {
 let jobQueue = Promise.resolve();
 let queuedJobs = 0;
 let runningJobs = 0;
+const GENERATION_CACHE_TTL_MS = 10 * 60_000;
+const generationCache: Map<string, { expires: number; result: any }> =
+  ((globalThis as any).__quakeGenerationCache ||= new Map());
 
 export async function POST(req: NextRequest) {
   try {
@@ -67,6 +70,17 @@ export async function POST(req: NextRequest) {
       noPdf = false, noExtended = false,
       tz = "utc", mapView = "mag",
     } = body;
+    const cacheKey = generationCacheKey({
+      mode, lat, lon, mag, time, depth, place, magType, eventId,
+      radiusKm, startTime, endTime, minMag, figNum, slug, titleZh, titleEn,
+      noPdf, noExtended, tz, mapView,
+    });
+    const cached = getGenerationCache(cacheKey);
+    if (cached) {
+      return body.stream
+        ? streamCachedResult(cached)
+        : NextResponse.json({ ...cached, cacheHit: true, note: "参数未变，复用最近一次生成结果" });
+    }
 
     // 构造 CLI 参数
     const args: string[] = ["--mode", mode];
@@ -124,7 +138,7 @@ export async function POST(req: NextRequest) {
     args.push("--json-summary", jsonPath);
 
     if (body.stream) {
-      return streamPython(CLI_SCRIPT, args, jsonPath, outputDir, !noPdf);
+      return streamPython(CLI_SCRIPT, args, jsonPath, outputDir, !noPdf, cacheKey);
     }
 
     // 调用 Python
@@ -164,7 +178,9 @@ export async function POST(req: NextRequest) {
 
     const item = summary[0];
     try {
-      return NextResponse.json(buildResultPayload(item, !noPdf));
+      const payload = buildResultPayload(item, !noPdf);
+      setGenerationCache(cacheKey, payload);
+      return NextResponse.json(payload);
     } finally {
       await cleanupOutput(outputDir);
     }
@@ -174,6 +190,37 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+function generationCacheKey(value: any) {
+  return createHash("sha1").update(JSON.stringify(value)).digest("hex");
+}
+
+function getGenerationCache(key: string) {
+  const hit = generationCache.get(key);
+  if (!hit) return null;
+  if (hit.expires <= Date.now()) {
+    generationCache.delete(key);
+    return null;
+  }
+  return hit.result;
+}
+
+function setGenerationCache(key: string, result: any) {
+  generationCache.set(key, { expires: Date.now() + GENERATION_CACHE_TTL_MS, result });
+}
+
+function streamCachedResult(result: any) {
+  const encoder = new TextEncoder();
+  const body =
+    `${JSON.stringify({ type: "progress", progress: 100, message: "参数未变，复用最近一次生成结果" })}\n` +
+    `${JSON.stringify({ type: "done", progress: 100, result: { ...result, cacheHit: true, note: "参数未变，复用最近一次生成结果" } })}\n`;
+  return new Response(encoder.encode(body), {
+    headers: {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Cache-Control": "no-store",
+    },
+  });
 }
 
 function buildResultPayload(item: any, canPdf = true) {
@@ -233,7 +280,7 @@ async function cleanupOutput(outputDir: string) {
   await fs.rm(outputDir, { recursive: true, force: true }).catch(() => {});
 }
 
-function streamPython(script: string, args: string[], jsonPath: string, outputDir: string, canPdf: boolean) {
+function streamPython(script: string, args: string[], jsonPath: string, outputDir: string, canPdf: boolean, cacheKey: string) {
   const encoder = new TextEncoder();
   let stdout = "";
   let stderr = "";
@@ -340,10 +387,12 @@ function streamPython(script: string, args: string[], jsonPath: string, outputDi
             await fs.unlink(jsonPath).catch(() => {});
             const item = summary?.[0];
             if (!item) throw new Error("未获取到生成摘要");
+            const result = buildResultPayload(item, canPdf);
+            setGenerationCache(cacheKey, result);
             send({
               type: "done",
               progress: 100,
-              result: buildResultPayload(item, canPdf),
+              result,
             });
           } catch (e: any) {
             send({

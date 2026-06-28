@@ -63,6 +63,7 @@ def main() -> int:
             cursor = chunk_end
         set_meta(conn, "last_sync_utc", utc_now().isoformat())
         set_meta(conn, "min_magnitude", str(args.min_mag))
+        optimize_db(conn)
         conn.commit()
         row_count = conn.execute("select count(*) from events").fetchone()[0]
         write_status(conn, db, Path(args.status_json) if args.status_json else db.with_name("usgs_catalog_status.json"))
@@ -284,6 +285,14 @@ def export_csv_gz(conn: sqlite3.Connection, path: Path) -> None:
     print(f"CSV gzip exported: {path}")
 
 
+def optimize_db(conn: sqlite3.Connection) -> None:
+    try:
+        conn.execute("insert into events_fts(events_fts) values('optimize')")
+    except sqlite3.Error:
+        pass
+    conn.execute("analyze")
+
+
 def self_check() -> int:
     with tempfile.TemporaryDirectory() as td:
         db = Path(td) / "test.sqlite"
@@ -300,6 +309,9 @@ def self_check() -> int:
             assert abs(max_mag - 5.0) < 1e-9, max_mag
             fts_count = conn.execute("select count(*) from events_fts where events_fts match 'sichuan'").fetchone()[0]
             assert fts_count == 1, fts_count
+            optimize_db(conn)
+            analyzed = conn.execute("select count(*) from sqlite_stat1").fetchone()[0]
+            assert analyzed > 0, analyzed
         finally:
             conn.close()
     print("self-check ok")

@@ -9,12 +9,18 @@ const FDSN_BASE = "https://earthquake.usgs.gov/fdsnws/event/1";
 const DETAIL_BASE = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail";
 const execFileAsync = promisify(execFile);
 const PYTHON = process.env.PYTHON || "python3";
+const COUNT_CACHE_TTL_MS = 5 * 60_000;
+const countCache: Map<string, { expires: number; payload: any }> =
+  ((globalThis as any).__quakeCountCache ||= new Map());
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     let { lat, lon, time } = body;
     const { mode = "manual", eventId, radiusKm = 200, minMag = 3.0, startTime, endTime } = body;
+    const requestKey = JSON.stringify({ mode, eventId, lat, lon, time, radiusKm, minMag, startTime, endTime });
+    const cached = getCountCache(requestKey);
+    if (cached) return NextResponse.json({ ...cached, cacheHit: true, note: `${cached.note || "数量预估"}（短期缓存）` });
 
     if (mode === "eventid") {
       if (!eventId) {
@@ -51,13 +57,15 @@ export async function POST(req: NextRequest) {
       end: end.toISOString(),
     });
     if (localCount != null) {
-      return NextResponse.json({
+      const payload = {
         ok: true,
         count: localCount,
         cacheHit: false,
         localCatalog: true,
         note: "本地 SQLite 目录预估",
-      });
+      };
+      setCountCache(requestKey, payload);
+      return NextResponse.json(payload);
     }
 
     const params = new URLSearchParams({
@@ -73,10 +81,26 @@ export async function POST(req: NextRequest) {
     if (r.status >= 400) {
       return NextResponse.json({ ok: false, error: "USGS count 查询失败" }, { status: 502 });
     }
-    return NextResponse.json({ ok: true, count: Number(r.text.trim()), cacheHit: Boolean(r.cacheHit) });
+    const payload = { ok: true, count: Number(r.text.trim()), cacheHit: Boolean(r.cacheHit) };
+    setCountCache(requestKey, payload);
+    return NextResponse.json(payload);
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || String(e) }, { status: 500 });
   }
+}
+
+function getCountCache(key: string) {
+  const hit = countCache.get(key);
+  if (!hit) return null;
+  if (hit.expires <= Date.now()) {
+    countCache.delete(key);
+    return null;
+  }
+  return hit.payload;
+}
+
+function setCountCache(key: string, payload: any) {
+  countCache.set(key, { expires: Date.now() + COUNT_CACHE_TTL_MS, payload });
 }
 
 function formatUsgsDate(date: Date) {

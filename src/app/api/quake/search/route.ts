@@ -12,6 +12,9 @@ const PAGE_SIZE = 10;
 const TEXT_CANDIDATE_LIMIT = 500;
 const execFileAsync = promisify(execFile);
 const PYTHON = process.env.PYTHON || "python3";
+const SEARCH_CACHE_TTL_MS = 5 * 60_000;
+const searchCache: Map<string, { expires: number; payload: any }> =
+  ((globalThis as any).__quakeSearchCache ||= new Map());
 
 export async function GET(req: NextRequest) {
   try {
@@ -19,15 +22,18 @@ export async function GET(req: NextRequest) {
     const q = (url.searchParams.get("q") || "").trim();
     const page = Math.max(1, Number.parseInt(url.searchParams.get("page") || "1", 10) || 1);
     if (q.length < 2) return NextResponse.json({ ok: true, events: [], page, pageSize: PAGE_SIZE, total: 0 });
+    const cacheKey = `${q}\n${page}`;
+    const cached = getSearchCache(cacheKey);
+    if (cached) return NextResponse.json({ ...cached, cacheHit: true, note: `${cached.note || "搜索结果"}（短期缓存）` });
 
     const spec = parseQuery(q);
     const eventId = eventIdFromQuery(q);
     if (eventId) spec.eventId = eventId;
     const local = await searchLocalCatalog(spec, page);
-    if (local) return NextResponse.json(local);
+    if (local) return cachedJson(cacheKey, local);
 
     const idEvent = eventId ? await findByEventId(eventId) : null;
-    if (idEvent) return NextResponse.json({ ok: true, events: page === 1 ? [idEvent] : [], page, pageSize: PAGE_SIZE, total: 1 });
+    if (idEvent) return cachedJson(cacheKey, { ok: true, events: page === 1 ? [idEvent] : [], page, pageSize: PAGE_SIZE, total: 1 });
 
     const params = buildParams(spec);
 
@@ -40,7 +46,7 @@ export async function GET(req: NextRequest) {
         event.place.toLowerCase().includes(term) || event.eventId.toLowerCase().includes(term)
       );
       const start = (page - 1) * PAGE_SIZE;
-      return NextResponse.json({
+      return cachedJson(cacheKey, {
         ok: true,
         events: filtered.slice(start, start + PAGE_SIZE),
         page,
@@ -55,7 +61,7 @@ export async function GET(req: NextRequest) {
     params.set("limit", String(PAGE_SIZE));
     params.set("offset", String((page - 1) * PAGE_SIZE + 1));
     const fetched = await fetchEvents(params);
-    return NextResponse.json({
+    return cachedJson(cacheKey, {
       ok: true,
       events: fetched.events,
       page,
@@ -67,6 +73,21 @@ export async function GET(req: NextRequest) {
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || String(e) }, { status: 500 });
   }
+}
+
+function cachedJson(key: string, payload: any) {
+  searchCache.set(key, { expires: Date.now() + SEARCH_CACHE_TTL_MS, payload });
+  return NextResponse.json(payload);
+}
+
+function getSearchCache(key: string) {
+  const hit = searchCache.get(key);
+  if (!hit) return null;
+  if (hit.expires <= Date.now()) {
+    searchCache.delete(key);
+    return null;
+  }
+  return hit.payload;
 }
 
 async function searchLocalCatalog(spec: any, page: number) {

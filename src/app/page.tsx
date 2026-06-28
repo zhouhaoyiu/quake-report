@@ -6,6 +6,7 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -129,6 +130,8 @@ interface GenResult {
   mapMeta?: { view: MapView; display_count: number; total_count: number };
   warnings?: string[];
   canPdf?: boolean;
+  cacheHit?: boolean;
+  note?: string;
   error?: string;
 }
 
@@ -218,6 +221,7 @@ export default function Home() {
   const [darkMode, setDarkMode] = useState(initialSettings.darkMode);
   const [settingsReady, setSettingsReady] = useState(initialSettings.ready);
   const [catalogStatus, setCatalogStatus] = useState<CatalogStatus | null>(null);
+  const lastGenerateRef = useRef<{ key: string; result: GenResult; count: number | null; expires: number } | null>(null);
   const selectedRecentEvent = useMemo(
     () => recentEvents.find((item) => item.eventId === selectedEventId),
     [recentEvents, selectedEventId]
@@ -525,8 +529,23 @@ export default function Home() {
 
   // ---- 生成报告 ----
   async function generate() {
+    if (loading) {
+      toast({ title: "正在生成", description: "当前任务尚未完成，请稍候" });
+      return;
+    }
     const body = buildRequestBody();
     if (!body) return;
+    const requestKey = JSON.stringify(body);
+    const now = Date.now();
+    const cached = lastGenerateRef.current;
+    if (cached?.key === requestKey && cached.expires > now) {
+      setResult(cached.result);
+      setCatalogCount(cached.count);
+      setMapPreview(null);
+      setCacheNote("参数未变，已复用最近一次生成结果");
+      toast({ title: "已复用结果", description: "参数未变化，可直接下载" });
+      return;
+    }
     setLoading(true);
     setResult(null);
     setCatalogCount(null);
@@ -575,9 +594,15 @@ export default function Home() {
       setResult(j);
       if (j.ok) {
         setProgress(100);
+        lastGenerateRef.current = {
+          key: requestKey,
+          result: j,
+          count: catalogCount ?? j.stats?.total_count ?? j.stats?.n3 ?? null,
+          expires: Date.now() + 10 * 60_000,
+        };
         toast({
-          title: "生成成功",
-          description: "报告与图件已生成，可下载",
+          title: j.cacheHit ? "已复用结果" : "生成成功",
+          description: j.cacheHit ? "参数未变化，可直接下载" : "报告与图件已生成，可下载",
         });
       } else {
         toast({
@@ -1361,6 +1386,17 @@ export default function Home() {
                           decoding="async"
                           className="max-h-[45vh] w-full rounded-md object-contain"
                         />
+                      </div>
+                    )}
+                    {!mapPreview && catalogCount != null && (
+                      <div className="rounded-xl border border-dashed border-[#ded4c6] bg-[#fffdf8] p-4 text-sm text-[#76695d] dark:border-[#3a332c] dark:bg-[#1c1814] dark:text-[#b7aa9b]">
+                        <div className="flex items-center gap-2 font-medium text-[#5a4b3f] dark:text-[#d8cbbb]">
+                          <ImageIcon className="h-4 w-4" />
+                          分布图准备中
+                        </div>
+                        <p className="mt-1 text-xs">
+                          预计目录 {catalogCount.toLocaleString()} 条，地图模式：{mapViewLabel}。图件生成后会自动显示预览。
+                        </p>
                       </div>
                     )}
                     <p className="text-xs text-[#76695d] dark:text-[#b7aa9b]">
