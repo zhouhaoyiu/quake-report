@@ -962,14 +962,18 @@ export default function Home() {
             </span>
             <div className="hidden md:flex items-center gap-2">
               {catalogStatus?.lastSyncUtc && (
-                <Badge
-                  variant="outline"
-                  title={catalogStatusTitle(catalogStatus)}
-                  className="bg-[#fffaf2] text-[#4f4237] border-[#ded4c6] dark:bg-[#211c17] dark:text-[#e8ddcf] dark:border-[#3a332c]"
-                >
-                  <Clock className="w-3 h-3 mr-1" />
-                  目录同步 {formatSyncTime(catalogStatus.lastSyncUtc)}
-                </Badge>
+                <span className="group relative inline-flex" tabIndex={0}>
+                  <Badge
+                    variant="outline"
+                    className="bg-[#fffaf2] text-[#4f4237] border-[#ded4c6] dark:bg-[#211c17] dark:text-[#e8ddcf] dark:border-[#3a332c]"
+                  >
+                    <Clock className="w-3 h-3 mr-1" />
+                    目录同步 {formatSyncTime(catalogStatus.lastSyncUtc)}
+                  </Badge>
+                  <span className="pointer-events-none absolute right-0 top-full z-50 mt-2 w-80 whitespace-pre-line rounded-lg border border-[#ded4c6] bg-[#fffdf8] p-3 text-left text-xs leading-relaxed text-[#4f4237] opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus:opacity-100 dark:border-[#3a332c] dark:bg-[#211c17] dark:text-[#e8ddcf]">
+                    {catalogStatusTitle(catalogStatus)}
+                  </span>
+                </span>
               )}
               <Badge variant="outline" className="bg-[#fffaf2] text-[#4f4237] border-[#ded4c6] dark:bg-[#211c17] dark:text-[#e8ddcf] dark:border-[#3a332c]">
                 <Calendar className="w-3 h-3 mr-1" />
