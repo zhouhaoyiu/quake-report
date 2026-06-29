@@ -161,6 +161,7 @@ interface CatalogStatus {
   rows?: number;
   lastSyncUtc?: string;
   lastEventTime?: string;
+  minMagnitude?: number;
 }
 
 export default function Home() {
@@ -792,6 +793,17 @@ export default function Home() {
     });
   }
 
+  function catalogStatusTitle(status: CatalogStatus) {
+    return [
+      `最近同步：${formatSyncTime(status.lastSyncUtc) || "未知"}`,
+      `现有事件：${status.rows == null ? "未知" : `${status.rows.toLocaleString()} 条`}`,
+      `目录下限：M≥${status.minMagnitude ?? 3}`,
+      `最新事件：${status.lastEventTime || "未知"}`,
+      "官方同步：USGS FDSN Event Web Service",
+      "https://earthquake.usgs.gov/fdsnws/event/1/query",
+    ].join("\n");
+  }
+
   const generationControls = (
     <div className="mb-3 rounded-xl border border-[#ded4c6] bg-[#fffdf8] p-3 text-left dark:border-[#3a332c] dark:bg-[#1c1814]">
       {queuedEvent && (
@@ -950,7 +962,11 @@ export default function Home() {
             </span>
             <div className="hidden md:flex items-center gap-2">
               {catalogStatus?.lastSyncUtc && (
-                <Badge variant="outline" className="bg-[#fffaf2] text-[#4f4237] border-[#ded4c6] dark:bg-[#211c17] dark:text-[#e8ddcf] dark:border-[#3a332c]">
+                <Badge
+                  variant="outline"
+                  title={catalogStatusTitle(catalogStatus)}
+                  className="bg-[#fffaf2] text-[#4f4237] border-[#ded4c6] dark:bg-[#211c17] dark:text-[#e8ddcf] dark:border-[#3a332c]"
+                >
                   <Clock className="w-3 h-3 mr-1" />
                   目录同步 {formatSyncTime(catalogStatus.lastSyncUtc)}
                 </Badge>

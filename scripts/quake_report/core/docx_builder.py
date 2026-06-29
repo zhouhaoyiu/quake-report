@@ -24,6 +24,7 @@ from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, Twips, RGBColor, Emu
 
 from .usgs_client import MainShock, CatalogStats, normalize_mag_type
+from .formatting import format_km
 from .narrative_builder import (
     build_narrative_zh,
     build_mainshock_summary_zh_v2,
@@ -396,7 +397,7 @@ def _catalog_date_range(catalog_df, tz: str) -> str:
 def _figure_source_note(stats: CatalogStats, radius_km: float, tz: str) -> str:
     min_mag = stats.query.min_magnitude if stats.query else 3.0
     return (
-        f"图件来源：USGS FDSN 历史目录；统计范围：震中 {int(radius_km)} km，M≥{min_mag:g}；"
+        f"图件来源：USGS FDSN 历史目录；统计范围：震中 {format_km(radius_km)} km，M≥{min_mag:g}；"
         f"全量统计 {stats.total_count} 条；时间按{_tz_name(tz)}显示。"
     )
 
@@ -864,7 +865,7 @@ def build_report(
             f"{mainshock.depth_km:.1f} km",
         ], [
             "统计半径",
-            f"{int(radius_km)} km",
+            f"{format_km(radius_km)} km",
             "主目录",
             "USGS FDSN",
         ]],
@@ -890,7 +891,7 @@ def build_report(
         [
             (
                 "统计结论",
-                f"以 USGS 为统计口径，震中 {int(radius_km)} km 范围内共有 {stats.total_count} 条记录"
+                f"以 USGS 为统计口径，震中 {format_km(radius_km)} km 范围内共有 {stats.total_count} 条记录"
                 f"（{mainshock_filter}），其中 M5+ {stats.n5} 条、M6+ {stats.n6} 条、M7+ {stats.n7} 条。",
             ),
             ("代表性事件", f"目录内最大震级记录为 {_event_brief(largest_event, tz)}。"),

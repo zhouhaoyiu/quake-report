@@ -23,6 +23,7 @@ from typing import Literal, Optional
 import pandas as pd
 
 from .usgs_client import CatalogStats, MainShock
+from .formatting import format_km
 
 
 Timezone = Literal["utc", "utc8", "cn", "both"]
@@ -161,9 +162,9 @@ def build_narrative_zh(
     use_since_1950 = stats.use_since_1950
 
     if use_since_1950:
-        head = f"以本次震中为圆心、{int(radius_km)} km 为半径，自 1950 年以来，"
+        head = f"以本次震中为圆心、{format_km(radius_km)} km 为半径，自 1950 年以来，"
     else:
-        head = f"以本次震中为圆心、{int(radius_km)} km 为半径，USGS 目录共检索到"
+        head = f"以本次震中为圆心、{format_km(radius_km)} km 为半径，USGS 目录共检索到"
 
     if use_since_1950:
         counts_zh = f"USGS 目录记录 {_cumulative_counts_zh(stats)}。"
@@ -209,12 +210,12 @@ def build_narrative_en(
 
     if use_since_1950:
         head = (
-            f"According to statistics, since 1950, within a {int(radius_km)}-km radius "
+            f"According to statistics, since 1950, within a {format_km(radius_km)}-km radius "
             f"around the epicenter of this earthquake, "
         )
     else:
         head = (
-            f"According to statistics, within a {int(radius_km)}-km radius "
+            f"According to statistics, within a {format_km(radius_km)}-km radius "
             f"around the epicenter of this earthquake, "
         )
 

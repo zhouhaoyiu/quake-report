@@ -31,6 +31,8 @@ import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
+import pandas as pd
+
 # 把 scripts/ 加入 sys.path 以便 import quake_report.core.*
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent.parent
@@ -42,6 +44,7 @@ from quake_report.core.usgs_client import (
     mainshock_from_manual, mainshock_from_csv_row,
     exclude_mainshock_like,
 )
+from quake_report.core.formatting import format_km
 from quake_report.core.map_renderer import render_distribution_map
 from quake_report.core.docx_builder import build_report, convert_docx_to_pdf
 from quake_report.core.supplemental_sources import collect_supplemental_data
@@ -99,7 +102,7 @@ def generate_one(
         max_radius_km=radius_km, start_time=start_time, end_time=catalog_end_time,
         min_magnitude=min_magnitude,
     )
-    print(f"\n[1/5] 查询 USGS 历史目录（半径 {radius_km} km，M≥{min_magnitude}）...")
+    print(f"\n[1/5] 查询 USGS 历史目录（半径 {format_km(radius_km)} km，M≥{min_magnitude}）...")
     catalog = fetch_historical_catalog(query, exclude_event_id=mainshock.event_id)
     catalog, removed_mainshock = exclude_mainshock_like(catalog, mainshock)
     print(f"  → 命中 {len(catalog)} 条事件")
@@ -120,7 +123,7 @@ def generate_one(
     print(f"  → 模式：{'B (自1950年以来)' if stats.use_since_1950 else 'A (完整版)'}")
 
     catalog_path = os.path.join(output_dir, f"{slug}_catalog.csv")
-    catalog.to_csv(catalog_path, index=False, encoding="utf-8-sig")
+    _write_catalog_csv(catalog, catalog_path)
     print(f"  → 统计目录 CSV：{catalog_path}")
 
     # 4) 渲染地图
@@ -222,6 +225,17 @@ def _map_meta(catalog, map_view: str) -> dict:
     else:
         display = total
     return {"view": map_view, "display_count": display, "total_count": total}
+
+
+def _write_catalog_csv(catalog, path: str) -> None:
+    df = catalog.copy()
+    for col in (
+        "latitude", "longitude", "depth", "mag", "nst", "gap", "dmin", "rms",
+        "horizontalError", "depthError", "magError", "magNst", "dist_km",
+    ):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    df.to_csv(path, index=False, encoding="utf-8-sig", quoting=csv.QUOTE_NONNUMERIC)
 
 
 # ============================================================================

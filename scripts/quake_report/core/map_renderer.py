@@ -38,6 +38,7 @@ from cartopy.geodesic import Geodesic
 import shapefile
 
 from .usgs_client import MainShock, CatalogQuery
+from .formatting import format_km
 from .fault_loader import load_faults_in_bbox
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -606,7 +607,7 @@ def _draw_legend(ax, mainshock: MainShock, radius_km: float, map_view: str = "ma
                                linestyle="-", label="断层"))
     # 半径圆
     legend_items.append(Line2D([0], [0], color="#1f78b4", linewidth=1.8,
-                               linestyle="--", label=f"{int(radius_km)} km 半径"))
+                               linestyle="--", label=f"{format_km(radius_km)} km 半径"))
 
     leg = ax.legend(
         handles=legend_items,

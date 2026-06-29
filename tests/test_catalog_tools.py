@@ -10,6 +10,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 import search_usgs_catalog
 import sync_usgs_catalog
+from quake_report.core.formatting import format_km
 
 
 class CatalogToolTests(unittest.TestCase):
@@ -92,6 +93,10 @@ class CatalogToolTests(unittest.TestCase):
             sync_usgs_catalog.optimize_db(conn)
             analyzed = conn.execute("select count(*) from sqlite_stat1").fetchone()[0]
         self.assertGreater(analyzed, 0)
+
+    def test_format_km_keeps_decimal_radius(self):
+        self.assertEqual(format_km(200), "200")
+        self.assertEqual(format_km(200.5), "200.5")
 
 
 if __name__ == "__main__":
