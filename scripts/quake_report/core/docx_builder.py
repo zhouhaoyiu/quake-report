@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import tempfile
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 import matplotlib
@@ -22,7 +23,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, Twips, RGBColor, Emu
 
-from .usgs_client import MainShock, CatalogStats
+from .usgs_client import MainShock, CatalogStats, normalize_mag_type
 from .narrative_builder import (
     build_narrative_zh,
     build_mainshock_summary_zh_v2,
@@ -37,8 +38,8 @@ from .map_renderer import nearest_city_rows
 
 # 仿宋（PRC 官方公文常用字体）。环境中可能没有 _GB2312 变体，依次回退。
 FANGSONG_FONT_NAMES = ["仿宋_GB2312", "FangSong_GB2312", "仿宋", "FangSong", "STFangsong",
-                       "Noto Serif SC", "Noto Sans SC", "SimSun"]
-HEITI_FONT_NAMES = ["黑体", "SimHei", "STHeiti", "Microsoft YaHei", "Noto Sans SC"]
+                       "Noto Serif SC", "Noto Sans CJK SC", "Noto Sans SC", "SimSun"]
+HEITI_FONT_NAMES = ["黑体", "SimHei", "STHeiti", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC"]
 REPORT_BLUE = RGBColor(0x1F, 0x4E, 0x79)
 MUTED_GRAY = RGBColor(0x66, 0x66, 0x66)
 LIGHT_BLUE = "EAF2F8"
@@ -52,6 +53,7 @@ def _chart_font():
     if _CHART_FONT is not None:
         return _CHART_FONT
     for path in [
+        str(Path.home() / "Library/Fonts/NotoSansCJKsc-Regular.otf"),
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/google-noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
@@ -248,12 +250,12 @@ def _add_report_paragraph(doc, text: str, *, size=10.5, bold=False, color=None):
     return p
 
 
-def _add_note_box(doc, text: str):
+def _add_note_box(doc, text: str, *, fill: str = "F7F9FB"):
     table = doc.add_table(rows=1, cols=1)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     _set_table_width(table)
     cell = table.cell(0, 0)
-    _write_cell(cell, text, size=9.5, fill="F7F9FB")
+    _write_cell(cell, text, size=9.5, fill=fill)
     p = doc.add_paragraph()
     _set_auto_spacing(p, before=2, after=2, line=1.0)
     return table
@@ -326,7 +328,7 @@ def _event_rows(df, *, tz: str, limit: int = 8):
         rows.append([
             _fmt_catalog_time(row.get("time"), tz),
             f"{float(row.get('mag', 0)):.1f}",
-            str(row.get("magType", row.get("magtype", ""))).upper(),
+            normalize_mag_type(row.get("magType", row.get("magtype", ""))),
             f"{float(row.get('depth', 0)):.1f}",
             f"{float(row.get('dist_km', 0)):.1f}",
             str(row.get("place", ""))[:52],
@@ -815,12 +817,6 @@ def build_report(
             f"{datetime.now().year}年{mainshock.time_utc.month}月"
             f"{spacer}{place_short} M{mainshock.magnitude:.1f} 地震震中区地震活动分析"
         )
-    if title_en is None:
-        title_en = (
-            f"Seismicity around the "
-            f"M{mainshock.magnitude:.1f} Earthquake"
-        )
-
     doc = Document()
 
     style_normal = doc.styles["Normal"]
@@ -851,12 +847,6 @@ def build_report(
     _set_auto_spacing(p, before=0, after=4, line=1.05)
     run = p.add_run(title_zh)
     _set_run_font(run, HEITI_FONT_NAMES, size_pt=16.5, bold=True, color=REPORT_BLUE)
-
-    p = doc.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    _set_auto_spacing(p, before=0, after=10, line=1.05)
-    run = p.add_run(title_en)
-    _set_run_font(run, HEITI_FONT_NAMES, size_pt=10.5, color=MUTED_GRAY)
 
     _add_table(
         doc,
@@ -936,6 +926,11 @@ def build_report(
             ["天地图 1:100万 BOUL / Natural Earth", "中国区域使用国内 1:100万 BOUL 边界；国外使用 Natural Earth 底图和城市", "用于地图绘制"],
         ],
         widths_cm=[4.2, 7.2, 5.0],
+    )
+    _add_note_box(
+        doc,
+        "数据追溯：生成报告时同步导出同名统计目录 CSV，表格统计、代表性事件和距离字段均可据此复核。",
+        fill="FFF2CC",
     )
 
     emsc_rows = _emsc_summary_rows(supplemental, tz)
@@ -1060,8 +1055,6 @@ def build_report(
     _add_image_centered(doc, map_image_path, width_cm=15.8)
     _add_centered_paragraph(doc, f"图{fig_num} 震中周围地震分布图",
                             font_names=FANGSONG_FONT_NAMES, size_pt=9.5, line_pt=16.0)
-    _add_centered_paragraph(doc, f"Fig. {fig_num} Distribution of earthquakes around the epicenter",
-                            font_names=FANGSONG_FONT_NAMES, size_pt=8.5, line_pt=14.0)
     _add_centered_paragraph(doc, _figure_source_note(stats, radius_km, tz),
                             font_names=FANGSONG_FONT_NAMES, size_pt=7.5, line_pt=11.0)
 

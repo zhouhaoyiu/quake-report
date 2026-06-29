@@ -59,6 +59,8 @@ def _ensure_font():
     if _FONT_REGISTERED:
         return
     for p in [
+        str(Path.home() / "Library/Fonts/NotoSansCJKsc-Regular.otf"),
+        str(Path.home() / "Library/Fonts/NotoSansCJKsc-Bold.otf"),
         "/usr/share/fonts/google-noto/NotoSansSC-Regular.otf",
         "/usr/share/fonts/google-noto/NotoSansSC-Bold.otf",
         "/usr/share/fonts/truetype/noto-serif-sc/NotoSerifSC-Regular.ttf",
@@ -69,6 +71,9 @@ def _ensure_font():
         "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
         "/usr/share/fonts/wqy-microhei/wqy-microhei.ttc",
         "/usr/share/fonts/wqy-zenhei/wqy-zenhei.ttc",
+        "/System/Library/Fonts/STHeiti Medium.ttc",
+        "/System/Library/Fonts/Hiragino Sans GB.ttc",
+        "/Library/Fonts/Arial Unicode.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     ]:
         if os.path.exists(p):
@@ -77,8 +82,9 @@ def _ensure_font():
             except Exception:
                 pass
     preferred = [
-        "Source Han Sans SC", "Noto Sans SC", "Noto Sans CJK SC",
-        "WenQuanYi Micro Hei", "WenQuanYi Zen Hei", "DejaVu Sans",
+        "Source Han Sans SC", "Noto Sans CJK SC", "Noto Sans SC",
+        "WenQuanYi Micro Hei", "WenQuanYi Zen Hei", "Heiti SC",
+        "Hiragino Sans GB", "Arial Unicode MS", "DejaVu Sans",
     ]
     available = {f.name for f in fm.fontManager.ttflist}
     families = [name for name in preferred if name in available] or ["DejaVu Sans"]
@@ -205,7 +211,6 @@ def render_distribution_map(
         _draw_global_city_labels(ax, min_lon, max_lon, min_lat, max_lat, lon0, lat0, proj)
 
     # ---- 历史地震圆点 ----
-    all_map_catalog = _catalog_for_map_display(catalog)
     map_catalog = _catalog_for_map_display(catalog, min_mag=4.0 if map_view == "m4" else None)
     if not map_catalog.empty:
         if map_view == "time":
@@ -221,7 +226,7 @@ def render_distribution_map(
                     linewidths=0.3, transform=proj, zorder=4,
                 )
                 cb = fig.colorbar(sc, ax=ax, shrink=0.64, pad=0.02)
-                cb.set_label("事件时间 / Event time", fontsize=8)
+                cb.set_label("事件时间", fontsize=8)
                 cb.ax.yaxis.set_major_formatter(mdates.DateFormatter("%Y"))
                 cb.ax.tick_params(labelsize=7)
         else:
@@ -241,8 +246,6 @@ def render_distribution_map(
                     rasterized=dense_small,
                 )
 
-    _draw_map_count_note(ax, len(map_catalog), len(all_map_catalog), map_view)
-
     # ---- 主震五角星 ----
     ax.scatter(
         lon0, lat0,
@@ -261,7 +264,7 @@ def render_distribution_map(
     # ---- 标题 ----
     if title_zh:
         ax.set_title(
-            f"{title_zh}\n{title_en or ''}",
+            title_zh,
             fontsize=12, pad=14, fontproperties=_map_font(True),
         )
 
@@ -298,21 +301,6 @@ def _adaptive_point_style(size: float, bin_count: int, total_count: int, hi: flo
     if total_count > 6000:
         return 6.0, 0.28, True
     return 8.0, 0.34, True
-
-
-def _draw_map_count_note(ax, shown: int, total: int, map_view: str):
-    mode = {
-        "m4": "图面隐藏 M3-M4",
-        "time": "按时间着色",
-    }.get(map_view, "全量按震级显示")
-    ax.text(
-        0.02, 0.98,
-        f"{mode}；地图显示 {shown}/{total} 条，统计使用全量目录",
-        transform=ax.transAxes, ha="left", va="top", fontsize=7.2, color="#333",
-        fontproperties=_map_font(),
-        bbox={"boxstyle": "round,pad=0.25", "facecolor": "white", "edgecolor": "#999", "alpha": 0.88},
-        zorder=40,
-    )
 
 
 def _draw_scale_bar(ax, min_lon, max_lon, min_lat, max_lat, proj):
@@ -598,7 +586,7 @@ def _draw_legend(ax, mainshock: MainShock, radius_km: float, map_view: str = "ma
     legend_items.append(Line2D([0], [0], marker="*", color="w",
                                markerfacecolor="#ffd400", markeredgecolor="black",
                                markersize=16, markeredgewidth=1.0,
-                               linestyle="None", label="震中  Epicenter"))
+                               linestyle="None", label="震中"))
     if map_view == "time":
         legend_items.append(Line2D([0], [0], marker="o", color="w",
                                    markerfacecolor="#d94801", markeredgecolor="#4a0000",
@@ -615,17 +603,16 @@ def _draw_legend(ax, mainshock: MainShock, radius_km: float, map_view: str = "ma
                                        linestyle="None", label=f"{label}"))
     # 断层
     legend_items.append(Line2D([0], [0], color="#7a3f2b", linewidth=1.6,
-                               linestyle="-", label="断层  Fault"))
+                               linestyle="-", label="断层"))
     # 半径圆
     legend_items.append(Line2D([0], [0], color="#1f78b4", linewidth=1.8,
                                linestyle="--", label=f"{int(radius_km)} km 半径"))
 
-    # 标题用中英双语
     leg = ax.legend(
         handles=legend_items,
         loc="lower right",
         fontsize=9,
-        title="图例 / Legend",
+        title="图例",
         title_fontsize=10,
         prop=_map_font(),
         frameon=True,

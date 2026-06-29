@@ -48,6 +48,7 @@ const PROJECT_ROOT = process.cwd();
 const CLI_SCRIPT = path.join(PROJECT_ROOT, "scripts", "quake_report", "cli.py");
 const MIME: Record<string, string> = {
   ".png": "image/png",
+  ".csv": "text/csv; charset=utf-8",
   ".pdf": "application/pdf",
   ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 };
@@ -225,6 +226,7 @@ function streamCachedResult(result: any) {
 
 function buildResultPayload(item: any, canPdf = true) {
   const map = toStoredFile(item.files.map, false);
+  const catalog = toStoredFile(item.files.catalog, true);
   const docx = toStoredFile(item.files.docx, true);
   const pdf = toStoredFile(item.files.pdf, true);
   const publicMainshock = item.mainshock ?? {
@@ -241,15 +243,17 @@ function buildResultPayload(item: any, canPdf = true) {
     ok: true,
     files: {
       map: map?.url ?? null,
+      catalog: catalog?.downloadUrl ?? null,
       docx: docx?.downloadUrl ?? null,
       pdf: pdf?.downloadUrl ?? null,
     },
     fileNames: {
       map: map?.fileName ?? null,
+      catalog: catalog?.fileName ?? null,
       docx: docx?.fileName ?? null,
       pdf: pdf?.fileName ?? null,
     },
-    fileRefs: { map, docx, pdf },
+    fileRefs: { map, catalog, docx, pdf },
     mainshock: publicMainshock,
     stats: item.stats,
     mapMeta: item.mapMeta,
@@ -258,7 +262,7 @@ function buildResultPayload(item: any, canPdf = true) {
   };
 }
 
-function toStoredFile(p: string | null, downloadOnly: boolean) {
+function toStoredFile(p: string | null | undefined, downloadOnly: boolean) {
   if (!p) return null;
   const ext = path.extname(p).toLowerCase();
   const mime = MIME[ext] || "application/octet-stream";

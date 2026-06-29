@@ -118,10 +118,11 @@ function readSavedSettings(): SavedSettings & { ready: boolean } {
 
 interface GenResult {
   ok: boolean;
-  files?: { map: string | null; docx: string | null; pdf: string | null };
-  fileNames?: { map: string | null; docx: string | null; pdf: string | null };
+  files?: { map: string | null; catalog?: string | null; docx: string | null; pdf: string | null };
+  fileNames?: { map: string | null; catalog?: string | null; docx: string | null; pdf: string | null };
   fileRefs?: {
     map?: ReportFileRef | null;
+    catalog?: ReportFileRef | null;
     docx?: ReportFileRef | null;
     pdf?: ReportFileRef | null;
   };
@@ -1518,7 +1519,17 @@ export default function Home() {
                     )}
 
                     {/* 下载按钮 */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      {result.files?.catalog && (
+                        <a
+                          href={result.files.catalog}
+                          download={result.fileNames?.catalog || "catalog.csv"}
+                          className="flex items-center justify-center gap-2 h-11 border border-[#ded4c6] bg-white text-[#2d241c] hover:bg-[#fff8ee] rounded-md text-sm font-medium transition dark:border-[#3a332c] dark:bg-[#211c17] dark:text-[#f4eee5] dark:hover:bg-[#2b251f]"
+                        >
+                          <Download className="w-4 h-4" />
+                          下载目录 CSV
+                        </a>
+                      )}
                       {result.files?.docx && (
                         <a
                           href={result.files.docx}

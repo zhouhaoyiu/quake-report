@@ -34,6 +34,13 @@ _CACHE_TTL_SEC = int(os.environ.get("QUAKE_USGS_CACHE_TTL", "86400"))
 _CATALOG_DB_ENV = "QUAKE_USGS_CATALOG_DB"
 
 
+def normalize_mag_type(value: str | None) -> str:
+    mag_type = str(value or "Mw").strip()
+    if mag_type.upper().startswith("MW"):
+        return "MW"
+    return mag_type.upper()
+
+
 def _get_text(url: str, *, params: dict | None = None, timeout: int = 30, cache_ttl: int | None = None):
     ttl = _CACHE_TTL_SEC if cache_ttl is None else cache_ttl
     key_src = json.dumps([url, sorted((params or {}).items())], ensure_ascii=False, default=str)
@@ -170,7 +177,7 @@ def fetch_mainshock_by_id(event_id: str, timeout: int = 30) -> MainShock:
         longitude=coords[0],
         depth_km=coords[2],
         magnitude=props["mag"],
-        mag_type=str(props["magType"]).upper(),
+        mag_type=normalize_mag_type(props.get("magType")),
         time_utc=_parse_usgs_time(props["time"]),
         place=props.get("place", ""),
     )
@@ -222,7 +229,7 @@ def mainshock_from_manual(
         longitude=longitude,
         depth_km=depth_km,
         magnitude=magnitude,
-        mag_type=mag_type,
+        mag_type=normalize_mag_type(mag_type),
         time_utc=time_utc,
         place=place,
     )

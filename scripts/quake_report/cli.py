@@ -119,6 +119,10 @@ def generate_one(
         )
     print(f"  → 模式：{'B (自1950年以来)' if stats.use_since_1950 else 'A (完整版)'}")
 
+    catalog_path = os.path.join(output_dir, f"{slug}_catalog.csv")
+    catalog.to_csv(catalog_path, index=False, encoding="utf-8-sig")
+    print(f"  → 统计目录 CSV：{catalog_path}")
+
     # 4) 渲染地图
     map_path = os.path.join(output_dir, f"{slug}_map.png")
     if title_zh is None:
@@ -177,6 +181,7 @@ def generate_one(
         "mainshock": mainshock,
         "stats": stats,
         "map_path": map_path,
+        "catalog_path": catalog_path,
         "docx_path": docx_path,
         "pdf_path": pdf_path,
         "warnings": warnings,
@@ -448,6 +453,7 @@ def main(argv=None):
                 "warnings": r.get("warnings", []),
                 "files": {
                     "map": r["map_path"],
+                    "catalog": r["catalog_path"],
                     "docx": r["docx_path"],
                     "pdf": r["pdf_path"],
                 },
