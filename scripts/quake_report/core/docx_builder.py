@@ -251,17 +251,6 @@ def _add_report_paragraph(doc, text: str, *, size=10.5, bold=False, color=None):
     return p
 
 
-def _add_note_box(doc, text: str, *, fill: str = "F7F9FB"):
-    table = doc.add_table(rows=1, cols=1)
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    _set_table_width(table)
-    cell = table.cell(0, 0)
-    _write_cell(cell, text, size=9.5, fill=fill)
-    p = doc.add_paragraph()
-    _set_auto_spacing(p, before=2, after=2, line=1.0)
-    return table
-
-
 def _add_key_points_box(doc, points):
     table = doc.add_table(rows=len(points), cols=1)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -927,11 +916,6 @@ def build_report(
             ["天地图 1:100万 BOUL / Natural Earth", "中国区域使用国内 1:100万 BOUL 边界；国外使用 Natural Earth 底图和城市", "用于地图绘制"],
         ],
         widths_cm=[4.2, 7.2, 5.0],
-    )
-    _add_note_box(
-        doc,
-        "数据追溯：生成报告时同步导出同名统计目录 CSV，表格统计、代表性事件和距离字段均可据此复核。",
-        fill="FFF2CC",
     )
 
     emsc_rows = _emsc_summary_rows(supplemental, tz)
