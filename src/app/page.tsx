@@ -4,7 +4,6 @@ import {
   memo,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -166,7 +165,6 @@ interface CatalogStatus {
 
 export default function Home() {
   const { toast } = useToast();
-  const [initialSettings] = useState(readSavedSettings);
   const [mode, setMode] = useState<Mode>("manual");
   const [sourcePanel, setSourcePanel] = useState<SourcePanel>("input");
 
@@ -198,14 +196,14 @@ export default function Home() {
   const [selectedCatalogEvent, setSelectedCatalogEvent] = useState<RecentEvent | null>(null);
 
   // 通用查询参数
-  const [radiusKm, setRadiusKm] = useState(initialSettings.radiusKm);
-  const [minMag, setMinMag] = useState(initialSettings.minMag);
-  const [figNum, setFigNum] = useState(initialSettings.figNum);
+  const [radiusKm, setRadiusKm] = useState(DEFAULT_SETTINGS.radiusKm);
+  const [minMag, setMinMag] = useState(DEFAULT_SETTINGS.minMag);
+  const [figNum, setFigNum] = useState(DEFAULT_SETTINGS.figNum);
   const [slug, setSlug] = useState("");
-  const [noPdf, setNoPdf] = useState(initialSettings.noPdf);
-  const [noExtended, setNoExtended] = useState(initialSettings.noExtended);
-  const [tz, setTz] = useState<TimezoneMode>(initialSettings.tz);
-  const [mapView, setMapView] = useState<MapView>(initialSettings.mapView);
+  const [noPdf, setNoPdf] = useState(DEFAULT_SETTINGS.noPdf);
+  const [noExtended, setNoExtended] = useState(DEFAULT_SETTINGS.noExtended);
+  const [tz, setTz] = useState<TimezoneMode>(DEFAULT_SETTINGS.tz);
+  const [mapView, setMapView] = useState<MapView>(DEFAULT_SETTINGS.mapView);
 
   // 生成状态
   const [loading, setLoading] = useState(false);
@@ -220,8 +218,8 @@ export default function Home() {
   const [result, setResult] = useState<GenResult | null>(null);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfStatus, setPdfStatus] = useState("");
-  const [darkMode, setDarkMode] = useState(initialSettings.darkMode);
-  const [settingsReady, setSettingsReady] = useState(initialSettings.ready);
+  const [darkMode, setDarkMode] = useState(DEFAULT_SETTINGS.darkMode);
+  const [settingsReady, setSettingsReady] = useState(false);
   const [catalogStatus, setCatalogStatus] = useState<CatalogStatus | null>(null);
   const lastGenerateRef = useRef<{ key: string; result: GenResult; count: number | null; expires: number } | null>(null);
   const selectedRecentEvent = useMemo(
@@ -280,9 +278,18 @@ export default function Home() {
     [catalogSearchQuery]
   );
 
-  useLayoutEffect(() => {
-    if (!settingsReady) setSettingsReady(true);
-  }, [settingsReady]);
+  useEffect(() => {
+    const saved = readSavedSettings();
+    setRadiusKm(saved.radiusKm);
+    setMinMag(saved.minMag);
+    setFigNum(saved.figNum);
+    setNoPdf(saved.noPdf);
+    setNoExtended(saved.noExtended);
+    setTz(saved.tz);
+    setMapView(saved.mapView);
+    setDarkMode(saved.darkMode);
+    setSettingsReady(true);
+  }, []);
 
   useEffect(() => {
     if (!settingsReady) return;

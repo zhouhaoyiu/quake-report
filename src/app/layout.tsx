@@ -19,6 +19,10 @@ export const metadata: Metadata = {
     "基于 USGS、EMSC/SeismicPortal、GEM 活动断层、Natural Earth 和天地图的地震活动分析报告生成工具。",
   keywords: ["地震", "USGS", "EMSC", "GEM", "天地图", "活动断层", "地震活动报告"],
   authors: [{ name: "Quake Report" }],
+  icons: {
+    icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
+    shortcut: "/favicon.svg",
+  },
   openGraph: {
     title: "地震活动报告生成器",
     description:
