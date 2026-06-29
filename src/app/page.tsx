@@ -685,10 +685,28 @@ export default function Home() {
     window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
   }
 
+  async function downloadReportFile(url: string | null | undefined, fileName: string, title: string) {
+    if (!url) return;
+    try {
+      const r = await fetch(url, { cache: "no-store" });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        throw new Error(j.error || "文件已过期，请重新生成报告");
+      }
+      downloadBlob(await r.blob(), fileName);
+    } catch (e: any) {
+      toast({
+        variant: "destructive",
+        title,
+        description: publicError(e?.message || String(e)),
+      });
+    }
+  }
+
   async function downloadPdf() {
     if (!result?.files?.docx) return;
     if (result.files.pdf) {
-      downloadDataUrl(result.files.pdf, result.fileNames?.pdf || "report.pdf");
+      await downloadReportFile(result.files.pdf, result.fileNames?.pdf || "report.pdf", "PDF 下载失败");
       return;
     }
     setPdfLoading(true);
@@ -715,11 +733,13 @@ export default function Home() {
         ...prev,
         files: {
           map: prev.files?.map || null,
+          catalog: prev.files?.catalog || null,
           docx: prev.files?.docx || null,
           pdf: objectUrl,
         },
         fileNames: {
           map: prev.fileNames?.map || null,
+          catalog: prev.fileNames?.catalog || null,
           docx: prev.fileNames?.docx || null,
           pdf: fileName,
         },
@@ -1521,24 +1541,24 @@ export default function Home() {
                     {/* 下载按钮 */}
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       {result.files?.catalog && (
-                        <a
-                          href={result.files.catalog}
-                          download={result.fileNames?.catalog || "catalog.csv"}
+                        <button
+                          type="button"
+                          onClick={() => downloadReportFile(result.files?.catalog, result.fileNames?.catalog || "catalog.csv", "目录 CSV 下载失败")}
                           className="flex items-center justify-center gap-2 h-11 border border-[#ded4c6] bg-white text-[#2d241c] hover:bg-[#fff8ee] rounded-md text-sm font-medium transition dark:border-[#3a332c] dark:bg-[#211c17] dark:text-[#f4eee5] dark:hover:bg-[#2b251f]"
                         >
                           <Download className="w-4 h-4" />
                           下载目录 CSV
-                        </a>
+                        </button>
                       )}
                       {result.files?.docx && (
-                        <a
-                          href={result.files.docx}
-                          download={result.fileNames?.docx || "report.docx"}
+                        <button
+                          type="button"
+                          onClick={() => downloadReportFile(result.files?.docx, result.fileNames?.docx || "report.docx", "Word 下载失败")}
                           className="flex items-center justify-center gap-2 h-11 bg-[#2d241c] hover:bg-[#3a2d23] text-[#fff8ee] rounded-md text-sm font-medium transition dark:bg-[#f4eee5] dark:text-[#171411] dark:hover:bg-white"
                         >
                           <FileText className="w-4 h-4" />
                           下载 Word (.docx)
-                        </a>
+                        </button>
                       )}
                       {result.canPdf && result.files?.docx && (
                         <button
