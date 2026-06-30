@@ -251,7 +251,6 @@ def build_mainshock_summary_zh_v2(
     return (
         f"本次地震发生于{time_str}，震中位于{lat_str}、{lon_str}，"
         f"震源深度约 {mainshock.depth_km:.1f} km，震级为 {mainshock.mag_type} {mainshock.magnitude:.1f}。"
-        f"{('地震名称为 ' + mainshock.place + '。') if mainshock.place else ''}"
     )
 
 
