@@ -214,6 +214,7 @@ export default function Home() {
 
   // eventid 模式
   const [eventId, setEventId] = useState("");
+  const [eventIdLookupLoading, setEventIdLookupLoading] = useState(false);
 
   // recent 模式
   const [recentEvents, setRecentEvents] = useState<RecentEvent[]>([]);
@@ -495,6 +496,43 @@ export default function Home() {
     });
   }, [resetGeneratedResult, toast]);
 
+  const lookupEventId = useCallback(async () => {
+    const id = eventId.trim();
+    if (!isEventIdLike(id)) {
+      toast({
+        variant: "destructive",
+        title: "Event ID 格式不对",
+        description: "请输入类似 us7000ndeb、nc75095651 这样的事件编号",
+      });
+      return;
+    }
+    setEventIdLookupLoading(true);
+    try {
+      const r = await fetch(`/api/quake/search?q=${encodeURIComponent(id)}&page=1`);
+      const j = await r.json();
+      const ev = j.events?.[0];
+      if (!j.ok || !ev || String(ev.eventId).toLowerCase() !== id.toLowerCase()) {
+        throw new Error("未找到这个 Event ID");
+      }
+      setEventId(ev.eventId);
+      setSelectedEventId("");
+      setSelectedCatalogEvent(ev);
+      resetGeneratedResult();
+      toast({
+        title: "已找到事件",
+        description: `${formatEventTime(ev.time)} · M${ev.mag.toFixed(1)} · ${ev.place}`,
+      });
+    } catch (e: any) {
+      toast({
+        variant: "destructive",
+        title: "查询失败",
+        description: publicError(e?.message || String(e)),
+      });
+    } finally {
+      setEventIdLookupLoading(false);
+    }
+  }, [eventId, resetGeneratedResult, toast]);
+
   const chooseBulletinCandidate = useCallback((ev: CandidateEvent) => {
     setSourcePanel("input");
     setMode("eventid");
@@ -591,7 +629,8 @@ export default function Home() {
       if (depth) body.depth = Number(depth);
       if (magType) body.magType = magType;
     } else if (mode === "eventid") {
-      if (!eventId) {
+      const id = eventId.trim();
+      if (!id) {
         toast({
           variant: "destructive",
           title: "缺少 eventid",
@@ -599,7 +638,15 @@ export default function Home() {
         });
         return null;
       }
-      body.eventId = eventId;
+      if (!isEventIdLike(id)) {
+        toast({
+          variant: "destructive",
+          title: "Event ID 格式不对",
+          description: "请输入类似 us7000ndeb、nc75095651 这样的事件编号",
+        });
+        return null;
+      }
+      body.eventId = id;
     } else if (mode === "recent") {
       if (!selectedEventId) {
         toast({
@@ -1554,16 +1601,31 @@ export default function Home() {
                     <Label htmlFor="eventId" className="text-xs">
                       USGS Event ID
                     </Label>
-                    <Input
-                      id="eventId"
-                      placeholder="例：us7000xxxx"
-                      value={eventId}
-                      onChange={(e) => {
-                        setEventId(e.target.value);
-                        setSelectedCatalogEvent(null);
-                        setPlace("");
-                      }}
-                    />
+                    <div className="flex gap-2">
+                      <Input
+                        id="eventId"
+                        placeholder="例：us7000xxxx"
+                        value={eventId}
+                        onChange={(e) => {
+                          setEventId(e.target.value);
+                          setSelectedCatalogEvent(null);
+                          setPlace("");
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") lookupEventId();
+                        }}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-10 shrink-0 px-4"
+                        onClick={lookupEventId}
+                        disabled={eventIdLookupLoading}
+                      >
+                        {eventIdLookupLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
+                        查询
+                      </Button>
+                    </div>
                     <p className="text-xs text-[#76695d] mt-1 dark:text-[#b7aa9b]">
                       形如 <code className="bg-[#efe6d8] px-1 rounded dark:bg-[#2b251f]">us7000ndeb</code>，可在 USGS
                       事件页面 URL 末段找到。
@@ -1924,6 +1986,11 @@ function formatParsedNumber(value: number, digits: number) {
 
 function formatEventTime(value: string) {
   return value.slice(0, 16).replace("T", " ");
+}
+
+function isEventIdLike(value: string) {
+  const id = value.trim();
+  return id.length >= 6 && /^[a-z0-9_-]+$/i.test(id) && /\d/.test(id);
 }
 
 function needsCandidateFallback(parsed: ParsedQuakeText | null) {
