@@ -29,6 +29,7 @@ import {
   Sun,
   RotateCcw,
   BookOpen,
+  Settings,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -219,6 +220,7 @@ export default function Home() {
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfStatus, setPdfStatus] = useState("");
   const [darkMode, setDarkMode] = useState(DEFAULT_SETTINGS.darkMode);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsReady, setSettingsReady] = useState(false);
   const [catalogStatus, setCatalogStatus] = useState<CatalogStatus | null>(null);
   const lastGenerateRef = useRef<{ key: string; result: GenResult; count: number | null; expires: number } | null>(null);
@@ -836,7 +838,7 @@ export default function Home() {
         <Globe2 className="w-4 h-4 text-[#5a4b3f] dark:text-[#d8cbbb]" />
         查询与输出参数
       </div>
-      <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-[110px_96px_96px_minmax(240px,1fr)_170px]">
+      <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-[110px_96px_96px_minmax(240px,1fr)]">
         <div className="w-28">
           <Label htmlFor="radius" className="text-xs">查询半径 km</Label>
           <Input id="radius" className="h-8" placeholder="200" value={radiusKm} onChange={(e) => setRadiusKm(e.target.value)} />
@@ -853,47 +855,8 @@ export default function Home() {
           <Label htmlFor="slug" className="text-xs">输出文件名 (不含扩展名)</Label>
           <Input id="slug" className="h-8" placeholder={defaultSlugPlaceholder} value={slug} onChange={(e) => setSlug(e.target.value)} />
         </div>
-        <div className="w-44">
-          <Label htmlFor="tz" className="text-xs flex items-center gap-1">
-            <Clock className="w-3 h-3" />
-            时间显示时区
-          </Label>
-          <Select value={tz} onValueChange={(v) => setTz(v as typeof tz)}>
-            <SelectTrigger id="tz" className="h-8">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="utc8">北京时间 (UTC+8)</SelectItem>
-              <SelectItem value="utc">UTC</SelectItem>
-              <SelectItem value="both">同时显示 UTC 与北京时间</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
       </div>
       <div className="mt-2 flex flex-wrap items-end gap-2">
-        <div className="min-w-[260px] flex-1">
-          <Label htmlFor="mapView" className="text-xs">地图显示</Label>
-          <div id="mapView" className="grid h-8 grid-cols-3 rounded-md bg-[#efe6d8] p-0.5 text-xs dark:bg-[#2b251f]">
-            {MAP_VIEW_OPTIONS.map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => setMapView(value)}
-                className={`rounded px-2 transition ${mapView === value ? "bg-[#2d241c] text-[#fff8ee] shadow-sm dark:bg-[#f4eee5] dark:text-[#171411]" : "text-[#6f6256] hover:bg-[#fffaf2] dark:text-[#b7aa9b] dark:hover:bg-[#211c17]"}`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="flex h-8 min-w-[132px] items-center justify-between gap-2 rounded-md border border-[#ded4c6] bg-[#fffaf2] px-3 dark:border-[#3a332c] dark:bg-[#211c17]">
-            <Label htmlFor="noPdf" className="text-xs">跳过 PDF</Label>
-            <Switch id="noPdf" checked={noPdf} onCheckedChange={setNoPdf} />
-        </div>
-        <div className="flex h-8 min-w-[220px] items-center justify-between gap-2 rounded-md border border-[#ded4c6] bg-[#fffaf2] px-3 dark:border-[#3a332c] dark:bg-[#211c17]">
-            <Label htmlFor="noExtended" className="text-xs">简版报告</Label>
-            <Switch id="noExtended" checked={noExtended} onCheckedChange={setNoExtended} />
-        </div>
         <Button
           type="button"
           variant="outline"
@@ -1004,6 +967,68 @@ export default function Home() {
             >
               {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </Button>
+            <div className="relative">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                aria-label="长期设置"
+                onClick={() => setSettingsOpen((value) => !value)}
+              >
+                <Settings className="w-4 h-4" />
+              </Button>
+              {settingsOpen && (
+                <div className="absolute right-0 top-11 z-50 w-[320px] rounded-xl border border-[#ded4c6] bg-[#fffdf8] p-3 text-sm shadow-xl dark:border-[#3a332c] dark:bg-[#1c1814]">
+                  <div className="mb-3">
+                    <div className="font-semibold text-[#2d241c] dark:text-[#f4eee5]">长期设置</div>
+                    <div className="mt-1 text-xs text-[#76695d] dark:text-[#b7aa9b]">
+                      保存到本机浏览器，下次打开自动沿用。
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    <div>
+                      <Label htmlFor="settings-tz" className="mb-1 block text-xs">时间显示时区</Label>
+                      <Select value={tz} onValueChange={(v) => setTz(v as typeof tz)}>
+                        <SelectTrigger id="settings-tz" className="h-8">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="utc8">北京时间 (UTC+8)</SelectItem>
+                          <SelectItem value="utc">UTC</SelectItem>
+                          <SelectItem value="both">同时显示 UTC 与北京时间</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label htmlFor="settings-map-view" className="mb-1 block text-xs">地图显示</Label>
+                      <div id="settings-map-view" className="grid h-8 grid-cols-3 rounded-md bg-[#efe6d8] p-0.5 text-xs dark:bg-[#2b251f]">
+                        {MAP_VIEW_OPTIONS.map(([value, label]) => (
+                          <button
+                            key={value}
+                            type="button"
+                            onClick={() => setMapView(value)}
+                            className={`rounded px-2 transition ${mapView === value ? "bg-[#2d241c] text-[#fff8ee] shadow-sm dark:bg-[#f4eee5] dark:text-[#171411]" : "text-[#6f6256] hover:bg-[#fffaf2] dark:text-[#b7aa9b] dark:hover:bg-[#211c17]"}`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex h-9 items-center justify-between rounded-md border border-[#ded4c6] bg-[#fffaf2] px-3 dark:border-[#3a332c] dark:bg-[#211c17]">
+                      <Label htmlFor="settings-no-pdf" className="text-xs">不生成 PDF</Label>
+                      <Switch id="settings-no-pdf" checked={noPdf} onCheckedChange={setNoPdf} />
+                    </div>
+                    <div className="flex h-9 items-center justify-between rounded-md border border-[#ded4c6] bg-[#fffaf2] px-3 dark:border-[#3a332c] dark:bg-[#211c17]">
+                      <Label htmlFor="settings-no-extended" className="text-xs">简版报告</Label>
+                      <Switch id="settings-no-extended" checked={noExtended} onCheckedChange={setNoExtended} />
+                    </div>
+                    <div className="rounded-md bg-[#fffaf2] px-3 py-2 text-xs text-[#76695d] dark:bg-[#211c17] dark:text-[#b7aa9b]">
+                      内网/本地目录：服务端检测到本地 SQLite 目录时会优先用于搜索和预估；否则自动走 USGS。
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </header>
