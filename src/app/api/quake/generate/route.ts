@@ -43,6 +43,7 @@ import os from "os";
 import fsSync from "fs";
 import fs from "fs/promises";
 import { putReportFile } from "@/lib/report-file-store";
+import { resolvePythonBinary } from "@/lib/python-runtime";
 
 const PROJECT_ROOT = process.cwd();
 const CLI_SCRIPT = path.join(PROJECT_ROOT, "scripts", "quake_report", "cli.py");
@@ -356,7 +357,7 @@ function streamPython(script: string, args: string[], jsonPath: string, outputDi
           message: "任务开始执行",
           waitSec: (startedAt - queuedAt) / 1000,
         });
-        const python = process.env.PYTHON || "python3";
+        const python = resolvePythonBinary();
         const proc = spawn(python, [script, ...args], {
           env: { ...process.env, PYTHONUNBUFFERED: "1" },
         });
@@ -471,7 +472,7 @@ function runPython(script: string, args: string[]): Promise<{
   stderr: string;
 }> {
   return new Promise((resolve) => {
-    const python = process.env.PYTHON || "python3";
+    const python = resolvePythonBinary();
     const proc = spawn(python, [script, ...args], {
       env: { ...process.env, PYTHONUNBUFFERED: "1" },
     });

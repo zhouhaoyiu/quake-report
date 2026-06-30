@@ -4,11 +4,12 @@ import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
+import { resolvePythonBinary } from "@/lib/python-runtime";
 
 const FDSN_BASE = "https://earthquake.usgs.gov/fdsnws/event/1";
 const DETAIL_BASE = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail";
 const execFileAsync = promisify(execFile);
-const PYTHON = process.env.PYTHON || "python3";
+const PYTHON = resolvePythonBinary();
 const COUNT_CACHE_TTL_MS = 5 * 60_000;
 const countCache: Map<string, { expires: number; payload: any }> =
   ((globalThis as any).__quakeCountCache ||= new Map());

@@ -60,6 +60,10 @@ def _ensure_font():
     if _FONT_REGISTERED:
         return
     for p in [
+        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/STHeiti Light.ttc",
+        "/System/Library/Fonts/Supplemental/Songti.ttc",
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
         str(Path.home() / "Library/Fonts/NotoSansCJKsc-Regular.otf"),
         str(Path.home() / "Library/Fonts/NotoSansCJKsc-Bold.otf"),
         "/usr/share/fonts/google-noto/NotoSansSC-Regular.otf",
@@ -83,6 +87,7 @@ def _ensure_font():
             except Exception:
                 pass
     preferred = [
+        "PingFang SC", "STHeiti",
         "Source Han Sans SC", "Noto Sans CJK SC", "Noto Sans SC",
         "WenQuanYi Micro Hei", "WenQuanYi Zen Hei", "Heiti SC",
         "Hiragino Sans GB", "Arial Unicode MS", "DejaVu Sans",

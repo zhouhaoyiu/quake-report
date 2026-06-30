@@ -4,6 +4,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
+import { resolvePythonBinary } from "@/lib/python-runtime";
 
 const FDSN_QUERY = "https://earthquake.usgs.gov/fdsnws/event/1/query";
 const FDSN_COUNT = "https://earthquake.usgs.gov/fdsnws/event/1/count";
@@ -11,7 +12,7 @@ const DETAIL_BASE = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail";
 const PAGE_SIZE = 10;
 const TEXT_CANDIDATE_LIMIT = 500;
 const execFileAsync = promisify(execFile);
-const PYTHON = process.env.PYTHON || "python3";
+const PYTHON = resolvePythonBinary();
 const SEARCH_CACHE_TTL_MS = 5 * 60_000;
 const searchCache: Map<string, { expires: number; payload: any }> =
   ((globalThis as any).__quakeSearchCache ||= new Map());
@@ -71,8 +72,13 @@ export async function GET(req: NextRequest) {
       note: fetched.cacheHit ? "结果来自缓存" : "",
     });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message || String(e) }, { status: 500 });
+    return NextResponse.json({ ok: false, error: searchError(e) }, { status: 500 });
   }
+}
+
+function searchError(e: any) {
+  const message = e?.message || String(e);
+  return /timed out|timeout/i.test(message) ? "查询超时，请稍后重试或缩小检索条件" : message;
 }
 
 function cachedJson(key: string, payload: any) {

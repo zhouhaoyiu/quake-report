@@ -54,6 +54,8 @@ def _chart_font():
     if _CHART_FONT is not None:
         return _CHART_FONT
     for path in [
+        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/STHeiti Light.ttc",
         str(Path.home() / "Library/Fonts/NotoSansCJKsc-Regular.otf"),
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/google-noto/NotoSansCJK-Regular.ttc",

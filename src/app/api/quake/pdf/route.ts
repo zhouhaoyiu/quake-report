@@ -4,6 +4,7 @@ import path from "path";
 import os from "os";
 import fs from "fs/promises";
 import { getReportFile } from "@/lib/report-file-store";
+import { resolvePythonBinary } from "@/lib/python-runtime";
 
 const PROJECT_ROOT = process.cwd();
 const PDF_SCRIPT = path.join(PROJECT_ROOT, "scripts", "quake_report", "pdf_convert.py");
@@ -59,7 +60,7 @@ function encodeRFC5987(value: string) {
 
 function runPython(script: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    const python = process.env.PYTHON || "python3";
+    const python = resolvePythonBinary();
     const proc = spawn(python, [script, ...args], { env: { ...process.env, PYTHONUNBUFFERED: "1" } });
     let stdout = "";
     let stderr = "";
