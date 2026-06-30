@@ -6,7 +6,7 @@
 - 红色圆，按震级 5 档大小分级（3≤M<4 / 4≤M<5 / 5≤M<6 / 6≤M<7 / M≥7）
 - 黑色断层线（来自 GEM Global Active Faults）
 - 海岸线 + 国界（cartopy Natural Earth）
-- 200km 半径虚线圆
+- 以震中为中心的方位等距投影，让半径内点云保持圆形距离观感
 - 比例尺
 - 经纬度刻度
 - 右下角中文图例
@@ -29,16 +29,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.lines import Line2D
-from matplotlib.patches import Circle, FancyBboxPatch
+from matplotlib.patches import FancyBboxPatch
 
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from cartopy.io import shapereader
-from cartopy.geodesic import Geodesic
 import shapefile
 
 from .usgs_client import MainShock, CatalogQuery
-from .formatting import format_km
 from .fault_loader import load_faults_in_bbox
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -153,7 +151,7 @@ def render_distribution_map(
     Args:
         mainshock: 主震对象
         catalog: 历史地震目录（含 dist_km, mag 列）
-        query: 查询参数（用于确定半径圆）
+        query: 查询参数（用于确定制图范围）
         output_path: 输出 PNG 路径
         title_zh / title_en: 图标题
 
@@ -166,38 +164,26 @@ def render_distribution_map(
     radius_km = query.max_radius_km
 
     # bbox
-    min_lon, max_lon, min_lat, max_lat = _bbox_around(lat0, lon0, radius_km, pad_factor=1.25)
+    min_lon, max_lon, min_lat, max_lat = _bbox_around(lat0, lon0, radius_km, pad_factor=1.32)
 
     # 画布
     fig = plt.figure(figsize=(8.5, 7.0), constrained_layout=False)
-    proj = ccrs.PlateCarree()
-    ax = fig.add_axes([0.08, 0.10, 0.88, 0.82], projection=proj)
-    ax.set_extent([min_lon, max_lon, min_lat, max_lat], crs=proj)
+    data_crs = ccrs.PlateCarree()
+    map_crs = ccrs.AzimuthalEquidistant(central_longitude=lon0, central_latitude=lat0)
+    ax = fig.add_axes([0.08, 0.10, 0.88, 0.82], projection=map_crs)
+    ax.set_extent([min_lon, max_lon, min_lat, max_lat], crs=data_crs)
 
     # ---- 地理底图要素 ----
     # 海洋 / 陆地填色（淡）
     ax.add_feature(cfeature.LAND.with_scale("50m"), facecolor="#f5f3ed", zorder=0)
     ax.add_feature(cfeature.OCEAN.with_scale("50m"), facecolor="#e7f0f5", zorder=0)
     if _intersects_bbox((min_lon, max_lon, min_lat, max_lat), CHINA_BBOX):
-        _draw_china_official_boundaries(ax, min_lon, max_lon, min_lat, max_lat, proj)
+        _draw_china_official_boundaries(ax, min_lon, max_lon, min_lat, max_lat, data_crs)
     else:
         # 海岸线 + 国界
         ax.add_feature(cfeature.COASTLINE.with_scale("50m"), linewidth=0.8, edgecolor="#444", zorder=1)
         ax.add_feature(cfeature.BORDERS.with_scale("50m"), linewidth=0.6, edgecolor="#666",
                        linestyle="--", zorder=1)
-
-    # ---- 200km 半径圆 ----
-    # 用 cartopy Geodesic 计算圆周点
-    gd = Geodesic()
-    n_pts = 128
-    azis = np.linspace(0, 360, n_pts)
-    dists = np.full(n_pts, radius_km * 1000.0)
-    # Geodesic.direct(points, azimuths, distances)
-    pts = gd.direct([lon0, lat0], azis, dists)
-    clons = [p[0] for p in pts]
-    clats = [p[1] for p in pts]
-    ax.plot(clons, clats, color="#1f78b4", linewidth=1.8, linestyle="--",
-            transform=proj, zorder=3)
 
     # ---- 断层线（GEM） ----
     try:
@@ -206,15 +192,15 @@ def render_distribution_map(
             if len(f.points) >= 2:
                 xs, ys = zip(*f.points)
                 ax.plot(xs, ys, color="#7a3f2b", linewidth=0.9,
-                        transform=proj, zorder=2, alpha=0.9)
+                        transform=data_crs, zorder=2, alpha=0.9)
     except Exception as e:
         # 断层加载失败不应阻断出图
         print(f"[fault_loader] WARN: {e}")
 
     if _intersects_bbox((min_lon, max_lon, min_lat, max_lat), CHINA_BBOX):
-        _draw_china_city_labels(ax, min_lon, max_lon, min_lat, max_lat, lon0, lat0, proj)
+        _draw_china_city_labels(ax, min_lon, max_lon, min_lat, max_lat, lon0, lat0, data_crs)
     else:
-        _draw_global_city_labels(ax, min_lon, max_lon, min_lat, max_lat, lon0, lat0, proj)
+        _draw_global_city_labels(ax, min_lon, max_lon, min_lat, max_lat, lon0, lat0, data_crs)
 
     # ---- 历史地震圆点 ----
     map_catalog = _catalog_for_map_display(catalog, min_mag=4.0 if map_view == "m4" else None)
@@ -229,7 +215,7 @@ def render_distribution_map(
                     dated["longitude"], dated["latitude"],
                     s=sizes, c=mdates.date2num(dated["_map_time"].dt.to_pydatetime()),
                     cmap="YlOrRd", alpha=0.72, edgecolors="#4a0000",
-                    linewidths=0.3, transform=proj, zorder=4,
+                    linewidths=0.3, transform=data_crs, zorder=4,
                 )
                 cb = fig.colorbar(sc, ax=ax, shrink=0.64, pad=0.02)
                 cb.set_label("事件时间", fontsize=8)
@@ -248,7 +234,7 @@ def render_distribution_map(
                     alpha=point_alpha,
                     edgecolors="none" if dense_small else "#4a0000",
                     linewidths=0 if dense_small else 0.35,
-                    transform=proj, zorder=4,
+                    transform=data_crs, zorder=4,
                     rasterized=dense_small,
                 )
 
@@ -256,7 +242,7 @@ def render_distribution_map(
     ax.scatter(
         lon0, lat0,
         marker="*", s=600, c="#ffd400", edgecolors="#000",
-        linewidths=1.2, transform=proj, zorder=10,
+        linewidths=1.2, transform=data_crs, zorder=10,
     )
 
     # ---- 经纬度刻度 ----
@@ -275,10 +261,10 @@ def render_distribution_map(
         )
 
     # ---- 比例尺 ----
-    _draw_scale_bar(ax, min_lon, max_lon, min_lat, max_lat, proj)
+    _draw_scale_bar(ax, min_lon, max_lon, min_lat, max_lat, data_crs)
 
     # ---- 图例（右下角） ----
-    _draw_legend(ax, mainshock, radius_km, map_view=map_view)
+    _draw_legend(ax, mainshock, map_view=map_view)
 
     # 保存
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
@@ -315,9 +301,9 @@ def _draw_scale_bar(ax, min_lon, max_lon, min_lat, max_lat, proj):
     lat_span = max_lat - min_lat
     lat_ref = min_lat + lat_span / 2
     km_per_deg_lon = 111.32 * max(np.cos(np.radians(lat_ref)), 0.1)
-    # 取一个接近图宽 1/5 的常用长度
-    candidates = [5, 10, 20, 50, 100, 200, 500, 1000]
-    target_km = lon_span * km_per_deg_lon * 0.2
+    # 取一个接近图宽 1/5 的常用长度；200 km 查询半径常落到 100 km。
+    candidates = [5, 10, 20, 50, 100, 150, 200, 500, 1000]
+    target_km = lon_span * km_per_deg_lon * 0.22
     bar_km = min(candidates, key=lambda x: abs(x - target_km))
     bar_deg = bar_km / km_per_deg_lon
 
@@ -455,14 +441,45 @@ def _draw_china_city_labels(ax, min_lon, max_lon, min_lat, max_lat, lon0, lat0, 
         and min_lat <= float(c.get("lat", 999)) <= max_lat
         and _is_city_label(c)
     ]
-    if not cities:
-        return
     max_labels = 10 if (max_lon - min_lon) > 8 else 14
     cities.sort(key=lambda c: (float(c["lng"]) - lon0) ** 2 + (float(c["lat"]) - lat0) ** 2)
+    drawn_names = set()
     for city in cities[:max_labels]:
         lon, lat = float(city["lng"]), float(city["lat"])
         name = _short_city_name(str(city.get("name", "")))
+        drawn_names.add(name)
         _draw_city_label(ax, lon, lat, name, proj)
+    if len(drawn_names) < 4:
+        _draw_tianditu_region_labels(ax, min_lon, max_lon, min_lat, max_lat, drawn_names, proj)
+
+
+def _draw_tianditu_region_labels(ax, min_lon, max_lon, min_lat, max_lat, used_names: set[str], proj):
+    labels = []
+    target_bbox = (min_lon, max_lon, min_lat, max_lat)
+    for feature in _load_tianditu_china_geojson().get("features", []):
+        props = feature.get("properties") or {}
+        name = _short_region_name(str(props.get("name", "")))
+        if not name or name in used_names:
+            continue
+        rings = _geojson_rings(feature.get("geometry") or {})
+        points = [point for ring in rings for point in ring]
+        if not points:
+            continue
+        xs, ys = zip(*points)
+        bbox = (min(xs), max(xs), min(ys), max(ys))
+        if not _intersects_bbox(bbox, target_bbox):
+            continue
+        x0, x1 = max(bbox[0], min_lon), min(bbox[1], max_lon)
+        y0, y1 = max(bbox[2], min_lat), min(bbox[3], max_lat)
+        area = max(0.0, x1 - x0) * max(0.0, y1 - y0)
+        lon = float(props.get("lng") or (x0 + x1) / 2)
+        lat = float(props.get("lat") or (y0 + y1) / 2)
+        if not (min_lon <= lon <= max_lon and min_lat <= lat <= max_lat):
+            lon, lat = (x0 + x1) / 2, (y0 + y1) / 2
+        labels.append((area, lon, lat, name))
+    labels.sort(reverse=True)
+    for _, lon, lat, name in labels[:4]:
+        _draw_region_label(ax, lon, lat, name, proj)
 
 
 def _draw_global_city_labels(ax, min_lon, max_lon, min_lat, max_lat, lon0, lat0, proj):
@@ -519,6 +536,15 @@ def _draw_city_label(ax, lon: float, lat: float, name: str, proj):
     )
 
 
+def _draw_region_label(ax, lon: float, lat: float, name: str, proj):
+    ax.text(
+        lon, lat, name, fontsize=8.5, color="#555555",
+        ha="center", va="center", transform=proj, zorder=5.5,
+        fontproperties=_map_font(True),
+        path_effects=[path_effects.withStroke(linewidth=2.6, foreground="white", alpha=0.85)],
+    )
+
+
 @lru_cache(maxsize=1)
 def _load_global_cities() -> tuple[dict, ...]:
     try:
@@ -563,6 +589,22 @@ def _short_city_name(name: str) -> str:
     return name
 
 
+def _short_region_name(name: str) -> str:
+    replacements = {
+        "内蒙古自治区": "内蒙古",
+        "新疆维吾尔自治区": "新疆",
+        "西藏自治区": "西藏",
+        "广西壮族自治区": "广西",
+        "宁夏回族自治区": "宁夏",
+    }
+    if name in replacements:
+        return replacements[name]
+    for suffix in ("省", "市", "特别行政区"):
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
+
+
 def _is_city_label(city: dict) -> bool:
     name = str(city.get("name", ""))
     if not name or name == "境界线":
@@ -584,14 +626,14 @@ def _geojson_rings(geom: dict) -> list[list[tuple[float, float]]]:
     return []
 
 
-def _draw_legend(ax, mainshock: MainShock, radius_km: float, map_view: str = "mag"):
+def _draw_legend(ax, mainshock: MainShock, map_view: str = "mag"):
     """右下角图例框。"""
     # 图例条目
     legend_items = []
     # 主震
     legend_items.append(Line2D([0], [0], marker="*", color="w",
                                markerfacecolor="#ffd400", markeredgecolor="black",
-                               markersize=16, markeredgewidth=1.0,
+                               markersize=14, markeredgewidth=1.0,
                                linestyle="None", label="震中"))
     if map_view == "time":
         legend_items.append(Line2D([0], [0], marker="o", color="w",
@@ -610,25 +652,22 @@ def _draw_legend(ax, mainshock: MainShock, radius_km: float, map_view: str = "ma
     # 断层
     legend_items.append(Line2D([0], [0], color="#7a3f2b", linewidth=1.6,
                                linestyle="-", label="断层"))
-    # 半径圆
-    legend_items.append(Line2D([0], [0], color="#1f78b4", linewidth=1.8,
-                               linestyle="--", label=f"{format_km(radius_km)} km 半径"))
-
     leg = ax.legend(
         handles=legend_items,
         loc="lower right",
-        fontsize=9,
+        fontsize=8.2,
         title="图例",
-        title_fontsize=10,
+        title_fontsize=9,
         prop=_map_font(),
         frameon=True,
         fancybox=True,
         facecolor="white",
         edgecolor="#666",
-        framealpha=0.95,
-        borderpad=1.0,
-        labelspacing=0.5,
-        handletextpad=0.8,
+        framealpha=0.82,
+        borderpad=0.55,
+        labelspacing=0.32,
+        handletextpad=0.55,
+        borderaxespad=0.45,
     )
     leg.set_zorder(30)
     # 标题字体加粗

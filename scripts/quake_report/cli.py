@@ -31,8 +31,6 @@ import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-import pandas as pd
-
 # 把 scripts/ 加入 sys.path 以便 import quake_report.core.*
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent.parent
@@ -45,6 +43,8 @@ from quake_report.core.usgs_client import (
     exclude_mainshock_like,
 )
 from quake_report.core.formatting import format_km
+from quake_report.core.mainshock_helpers import apply_place_override
+from quake_report.core.catalog_export import write_catalog_csv
 from quake_report.core.map_renderer import render_distribution_map
 from quake_report.core.docx_builder import build_report, convert_docx_to_pdf
 from quake_report.core.supplemental_sources import collect_supplemental_data
@@ -70,7 +70,7 @@ def generate_one(
     title_en: str | None = None,
     output_dir: str = DOWNLOAD_DIR,
     also_pdf: bool = True,
-    include_extended: bool = True,
+    report_level: str = "simple",
     tz: str = "utc",
     map_view: str = "mag",
 ) -> dict:
@@ -120,10 +120,10 @@ def generate_one(
         warnings.append(
             f"USGS 返回记录达到 {stats.query_limit} 条查询上限，统计可能低于真实目录量；建议提高最小震级或缩小半径后复核。"
         )
-    print(f"  → 模式：{'B (自1950年以来)' if stats.use_since_1950 else 'A (完整版)'}")
+    print(f"  → 统计口径：自 {(query.start_time or datetime(1900, 1, 1)).year} 年以来")
 
     catalog_path = os.path.join(output_dir, f"{slug}_catalog.csv")
-    _write_catalog_csv(catalog, catalog_path)
+    write_catalog_csv(catalog, catalog_path)
     print(f"  → 统计目录 CSV：{catalog_path}")
 
     # 4) 渲染地图
@@ -164,7 +164,7 @@ def generate_one(
     build_report(
         mainshock, stats, catalog, map_path, docx_path,
         fig_num=fig_num, title_zh=title_zh, title_en=title_en,
-        radius_km=radius_km, include_extended_chapters=include_extended,
+        radius_km=radius_km, report_level=report_level,
         tz=tz, supplemental=supplemental, removed_mainshock_count=removed_mainshock,
         catalog_warnings=warnings,
     )
@@ -208,11 +208,15 @@ def _default_slug(mainshock: MainShock) -> str:
 def _default_title_zh(mainshock: MainShock) -> str:
     y = mainshock.time_utc.year
     m = mainshock.time_utc.month
-    return f"{y}年{m}月 M{mainshock.magnitude:.1f} 地震震中区地震活动分析"
+    place = (mainshock.place or "").split(",")[0].strip()[:24]
+    name = f"{place} " if place else ""
+    return f"{y}年{m}月 {name}M{mainshock.magnitude:.1f} 地震震中区历史地震活动分析"
 
 
 def _default_title_en(mainshock: MainShock) -> str:
-    return f"Seismicity around the {mainshock.time_utc:%Y-%m} M{mainshock.magnitude:.1f} Earthquake"
+    place = (mainshock.place or "").split(",")[0].strip()
+    name = f"{place} " if place else ""
+    return f"Seismicity around the {mainshock.time_utc:%Y-%m} {name}M{mainshock.magnitude:.1f} Earthquake"
 
 
 def _map_meta(catalog, map_view: str) -> dict:
@@ -225,17 +229,6 @@ def _map_meta(catalog, map_view: str) -> dict:
     else:
         display = total
     return {"view": map_view, "display_count": display, "total_count": total}
-
-
-def _write_catalog_csv(catalog, path: str) -> None:
-    df = catalog.copy()
-    for col in (
-        "latitude", "longitude", "depth", "mag", "nst", "gap", "dmin", "rms",
-        "horizontalError", "depthError", "magError", "magNst", "dist_km",
-    ):
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-    df.to_csv(path, index=False, encoding="utf-8-sig", quoting=csv.QUOTE_NONNUMERIC)
 
 
 # ============================================================================
@@ -369,8 +362,11 @@ def build_argparser() -> argparse.ArgumentParser:
                    help=f"输出目录（默认 {DOWNLOAD_DIR}）")
     p.add_argument("--no-pdf", action="store_true",
                    help="不生成 PDF（默认会生成）")
+    p.add_argument("--report-level", type=str, default="simple",
+                   choices=["simple", "medium", "full"],
+                   help="报告复杂度：simple 最简模板（默认）| medium 原简版 | full 完整扩展")
     p.add_argument("--no-extended", action="store_true",
-                   help="不生成扩展章节（仅 1 段文字+1 张图，匹配原模板）")
+                   help="兼容旧参数：等同 --report-level medium")
     p.add_argument("--tz", type=str, default="utc",
                    choices=["utc", "utc8", "cn", "both"],
                    help="时区显示模式：utc（默认）| utc8/cn（北京时间）| both（同时显示 UTC 和北京时间）")
@@ -412,6 +408,7 @@ def main(argv=None):
     else:
         print(f"ERROR: 未知模式 {args.mode}", file=sys.stderr)
         return 1
+    shocks = apply_place_override(shocks, args.place)
 
     # 逐个生成
     all_results = []
@@ -421,6 +418,7 @@ def main(argv=None):
         slug = args.slug
         if len(shocks) > 1 and slug:
             slug = f"{slug}_{i:03d}"
+        report_level = "medium" if args.no_extended else args.report_level
         result = generate_one(
             ms,
             radius_km=args.radius_km,
@@ -433,7 +431,7 @@ def main(argv=None):
             title_en=args.title_en,
             output_dir=args.output_dir,
             also_pdf=not args.no_pdf,
-            include_extended=not args.no_extended,
+            report_level=report_level,
             tz=args.tz,
             map_view=args.map_view,
         )

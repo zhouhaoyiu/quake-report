@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import tempfile
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -37,16 +38,68 @@ from .map_renderer import nearest_city_rows
 # 字体 & 样式常量
 # ============================================================================
 
-# 仿宋（PRC 官方公文常用字体）。环境中可能没有 _GB2312 变体，依次回退。
-FANGSONG_FONT_NAMES = ["仿宋_GB2312", "FangSong_GB2312", "仿宋", "FangSong", "STFangsong",
-                       "Noto Serif SC", "Noto Sans CJK SC", "Noto Sans SC", "SimSun"]
-HEITI_FONT_NAMES = ["黑体", "SimHei", "STHeiti", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC"]
+# 报告输出优先使用无版权争议的 Noto CJK。把实际可用字体写进 DOCX，
+# 避免 LibreOffice/WPS 在 PDF 转换时把中文 fallback 到奇怪字形。
+FANGSONG_FONT_NAMES = [
+    "Noto Sans CJK SC", "Noto Sans SC", "STHeiti", "Heiti SC",
+    "Songti SC", "SimSun", "仿宋_GB2312", "FangSong_GB2312", "仿宋", "FangSong", "STFangsong",
+]
+HEITI_FONT_NAMES = [
+    "Noto Sans CJK SC", "Noto Sans SC", "STHeiti", "Heiti SC",
+    "SimHei", "黑体", "Microsoft YaHei",
+]
 REPORT_BLUE = RGBColor(0x1F, 0x4E, 0x79)
 MUTED_GRAY = RGBColor(0x66, 0x66, 0x66)
 LIGHT_BLUE = "EAF2F8"
 LIGHT_GRAY = "F3F5F7"
 
 _CHART_FONT = None
+
+
+@lru_cache(maxsize=1)
+def _available_docx_fonts() -> set[str]:
+    known_font_paths = {
+        "Noto Sans CJK SC": [
+            str(Path.home() / "Library/Fonts/NotoSansCJKsc-Regular.otf"),
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/google-noto/NotoSansCJK-Regular.ttc",
+        ],
+        "Noto Sans SC": [
+            str(Path.home() / "Library/Fonts/NotoSansSC-Regular.otf"),
+        ],
+        "STHeiti": [
+            "/System/Library/Fonts/STHeiti Light.ttc",
+            "/System/Library/Fonts/STHeiti Medium.ttc",
+        ],
+        "Songti SC": [
+            "/System/Library/Fonts/Supplemental/Songti.ttc",
+        ],
+        "SimSun": [
+            str(Path.home() / "Library/Fonts/simsun.ttc"),
+        ],
+        "SimHei": [
+            str(Path.home() / "Library/Fonts/simhei.ttf"),
+        ],
+    }
+    available = {f.name for f in fm.fontManager.ttflist}
+    for family, paths in known_font_paths.items():
+        for path in paths:
+            if os.path.exists(path):
+                try:
+                    fm.fontManager.addfont(path)
+                except Exception:
+                    pass
+                available.add(family)
+                break
+    return available
+
+
+def _resolve_docx_font(font_names) -> str:
+    available = _available_docx_fonts()
+    for name in font_names:
+        if name in available:
+            return name
+    return font_names[0]
 
 
 def _chart_font():
@@ -81,7 +134,8 @@ def _set_run_font(run, font_names, size_pt=None, bold=False, color=None):
     if rfonts is None:
         rfonts = OxmlElement("w:rFonts")
         rpr.insert(0, rfonts)
-    primary = font_names[0]
+    primary = _resolve_docx_font(tuple(font_names))
+    run.font.name = primary
     rfonts.set(qn("w:ascii"), primary)
     rfonts.set(qn("w:hAnsi"), primary)
     rfonts.set(qn("w:cs"), primary)
@@ -795,19 +849,25 @@ def build_report(
     title_en: Optional[str] = None,
     radius_km: float = 200.0,
     include_extended_chapters: bool = True,
+    report_level: str | None = None,
     tz: str = "utc",
     supplemental: SupplementalData | None = None,
     removed_mainshock_count: int = 0,
     catalog_warnings: list[str] | None = None,
 ) -> str:
     """构建更紧凑的分析型 docx 报告。"""
+    if report_level is None:
+        report_level = "full" if include_extended_chapters else "medium"
+    elif report_level not in {"simple", "medium", "full"}:
+        report_level = "simple"
+    include_extended_chapters = report_level == "full"
     catalog_df = _prepare_catalog_columns(catalog_df)
     if title_zh is None:
         place_short = (mainshock.place.split(",")[0].strip() if mainshock.place else "震中区")[:20]
         spacer = " " if place_short.isascii() else ""
         title_zh = (
             f"{datetime.now().year}年{mainshock.time_utc.month}月"
-            f"{spacer}{place_short} M{mainshock.magnitude:.1f} 地震震中区地震活动分析"
+            f"{spacer}{place_short} M{mainshock.magnitude:.1f} 地震震中区历史地震活动分析"
         )
     doc = Document()
 
@@ -839,6 +899,31 @@ def build_report(
     _set_auto_spacing(p, before=0, after=4, line=1.05)
     run = p.add_run(title_zh)
     _set_run_font(run, HEITI_FONT_NAMES, size_pt=16.5, bold=True, color=REPORT_BLUE)
+
+    if report_level == "simple":
+        _add_report_paragraph(doc, build_mainshock_summary_zh_v2(mainshock, tz=tz))
+        _add_report_paragraph(
+            doc,
+            build_narrative_zh(
+                mainshock,
+                stats,
+                fig_num=fig_num,
+                radius_km=radius_km,
+                mag_type=mainshock.mag_type,
+                tz=tz,
+            ),
+        )
+        _add_image_centered(doc, map_image_path, width_cm=15.8)
+        _add_centered_paragraph(
+            doc,
+            f"图{fig_num} 震中周围历史地震分布图",
+            font_names=FANGSONG_FONT_NAMES,
+            size_pt=9.5,
+            line_pt=16.0,
+        )
+        os.makedirs(os.path.dirname(os.path.abspath(output_docx_path)), exist_ok=True)
+        doc.save(output_docx_path)
+        return output_docx_path
 
     _add_table(
         doc,

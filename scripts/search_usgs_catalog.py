@@ -52,6 +52,9 @@ def search(db: Path, spec: dict) -> dict:
             total = count_rows(conn, spec)
             return payload([], total, page, page_size, "本地 SQLite 目录快速计数")
 
+        if spec.get("candidateMatch"):
+            return candidate_payload(conn, spec, page_size)
+
         rows, total = select_rows(conn, spec, page, page_size)
         note = "本地 SQLite 目录搜索"
         if spec.get("text"):
@@ -88,6 +91,61 @@ def select_rows(conn: sqlite3.Connection, spec: dict, page: int, page_size: int)
         [*params, page_size, offset],
     ).fetchall()
     return rows, int(total)
+
+
+def candidate_payload(conn: sqlite3.Connection, spec: dict, limit: int) -> dict:
+    lat = spec.get("lat")
+    lon = spec.get("lon")
+    has_coords = lat is not None and lon is not None
+    if not has_coords and not (spec.get("text") or "").strip():
+        return payload([], 0, 1, limit, "缺少地点或经纬度，无法候选匹配")
+
+    radius = float(spec.get("radiusKm") or 300)
+    target_mag = float(spec.get("targetMag") or 0)
+    target_time = parse_utc_dt(spec.get("targetTimeUtc"))
+    query_spec = {**spec, "text": ""} if has_coords else spec
+    from_sql, where, params, _used_fts = build_query(conn, query_spec)
+    if has_coords:
+        where, params = add_bbox(where, params, float(lat), float(lon), radius)
+        candidates = conn.execute(
+            f"select {COLUMNS} {from_sql} where {' and '.join(where)} order by time desc",
+            params,
+        ).fetchall()
+    else:
+        candidates = conn.execute(
+            f"select {COLUMNS} {from_sql} where {' and '.join(where)} order by time desc limit 5000",
+            params,
+        ).fetchall()
+    scored = []
+    for row in candidates:
+        if has_coords and (row["latitude"] is None or row["longitude"] is None):
+            continue
+        event = row_to_event(row)
+        score = 0.0
+        if has_coords:
+            dist = haversine(float(lat), float(lon), float(row["latitude"]), float(row["longitude"]))
+            if dist > radius:
+                continue
+            score += dist / max(radius, 1)
+            event["matchDistanceKm"] = round(dist, 1)
+        if target_mag:
+            score += abs(float(event["mag"]) - target_mag) * 1.5
+        if target_time:
+            event_time = parse_utc_dt(event["time"])
+            if event_time:
+                score += time_shape_score(target_time, event_time)
+        event["matchScore"] = round(score, 4)
+        scored.append((score, event))
+
+    scored.sort(key=lambda item: item[0])
+    events = [event for _score, event in scored[:limit]]
+    criteria = "震中、" if has_coords else "地点、"
+    criteria += "震级、" if target_mag else ""
+    criteria += "月日时分、" if target_time else ""
+    return {
+        **payload(events, len(scored), 1, limit, f"按{criteria.rstrip('、')}从本地 SQLite 目录匹配候选"),
+        "candidateMatch": True,
+    }
 
 
 def count_rows(conn: sqlite3.Connection, spec: dict) -> int:
@@ -167,6 +225,29 @@ def sql_time(value: str | None, end: bool) -> str:
     return f"{value}Z"
 
 
+def parse_utc_dt(value: str | None) -> dt.datetime | None:
+    if not value:
+        return None
+    try:
+        normalized = value.replace("Z", "+00:00")
+        parsed = dt.datetime.fromisoformat(normalized)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=dt.timezone.utc)
+        return parsed.astimezone(dt.timezone.utc)
+    except ValueError:
+        return None
+
+
+def time_shape_score(target: dt.datetime, event: dt.datetime) -> float:
+    month_delta = 0 if target.month == event.month else 3
+    day_delta = min(abs(target.day - event.day), 31 - abs(target.day - event.day))
+    target_minutes = target.hour * 60 + target.minute
+    event_minutes = event.hour * 60 + event.minute
+    minute_delta = abs(target_minutes - event_minutes)
+    minute_delta = min(minute_delta, 1440 - minute_delta)
+    return month_delta + day_delta * 0.45 + minute_delta / 180
+
+
 def make_fts_query(text: str) -> str:
     tokens = re.findall(r"[0-9A-Za-z_\u4e00-\u9fff]+", text.lower())
     return " ".join(f"{token}*" for token in tokens[:8])
@@ -213,6 +294,7 @@ def self_check() -> int:
             upsert_rows(conn, [
                 {"id": "us1", "time": "2008-05-12T06:28:00.000Z", "latitude": "31.0", "longitude": "103.4", "depth": "19", "mag": "7.9", "magType": "Mw", "place": "Sichuan, China"},
                 {"id": "us2", "time": "2009-01-01T00:00:00.000Z", "latitude": "10.0", "longitude": "20.0", "depth": "10", "mag": "4.5", "magType": "mb", "place": "Elsewhere"},
+                {"id": "us3", "time": "2025-06-24T22:30:00.000Z", "latitude": "40.2", "longitude": "142.4", "depth": "50", "mag": "6.9", "magType": "Mww", "place": "near the east coast of Honshu, Japan"},
             ])
             conn.commit()
         result = search(db, {"text": "Sichuan", "start": "1900-01-01", "end": "2020-01-01", "minMag": 3, "page": 1, "pageSize": 10})
@@ -221,6 +303,28 @@ def self_check() -> int:
         assert result["total"] == 1, result
         result = search(db, {"lat": 31.0, "lon": 103.4, "radiusKm": 50, "start": "1900-01-01", "end": "2020-01-01", "minMag": 3, "countOnly": True})
         assert result["total"] == 1 and result["events"] == [], result
+        result = search(db, {
+            "candidateMatch": True,
+            "lat": 40.2,
+            "lon": 142.4,
+            "radiusKm": 200,
+            "minMag": 6.4,
+            "targetMag": 6.9,
+            "targetTimeUtc": "2026-06-24T22:30:00Z",
+            "pageSize": 5,
+        })
+        assert result["events"][0]["eventId"] == "us3", result
+        assert result["events"][0]["matchDistanceKm"] == 0.0, result
+        result = search(db, {
+            "candidateMatch": True,
+            "text": "Sichuan",
+            "minMag": 7.4,
+            "targetMag": 7.9,
+            "targetTimeUtc": "2026-05-12T06:28:00Z",
+            "pageSize": 5,
+        })
+        assert result["events"][0]["eventId"] == "us1", result
+        assert "matchDistanceKm" not in result["events"][0], result
     print("self-check ok")
     return 0
 

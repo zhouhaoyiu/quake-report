@@ -542,8 +542,7 @@ def compute_stats(catalog: pd.DataFrame, query: CatalogQuery) -> CatalogStats:
     s.nearest_m6 = nearest((m >= 6) & (m < 7))
     s.nearest_m5 = nearest((m >= 5) & (m < 6))
 
-    # 是否采用"自1950年以来"措辞：当 N7=0 且 N8=0 时（参考委内瑞拉模板）
-    s.use_since_1950 = (s.n7 == 0 and s.n8 == 0)
+    s.use_since_1950 = False
     return s
 
 

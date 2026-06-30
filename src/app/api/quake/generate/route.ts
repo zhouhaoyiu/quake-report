@@ -23,13 +23,13 @@
  *     "titleZh"?: string,
  *     "titleEn"?: string,
  *     "noPdf"?: boolean,
- *     "noExtended"?: boolean
+ *     "reportLevel"?: "simple" | "medium" | "full"
  *   }
  *
  * Response:
  *   {
  *     "ok": true,
- *     "files": { "map": "data:image/...", "docx": "data:application/...", "pdf": "data:application/..." },
+ *     "files": { "map": "/api/quake/file/...", "catalog": "/api/quake/file/...", "docx": "/api/quake/file/...", "pdf": null },
  *     "fileNames": { "map": "xxx_map.png", "docx": "xxx.docx", "pdf": "xxx.pdf" },
  *     "mainshock": {...},
  *     "stats": {...}
@@ -69,13 +69,14 @@ export async function POST(req: NextRequest) {
       eventId,
       radiusKm = 200, startTime, endTime, minMag = 3.0,
       figNum = "1", slug, titleZh, titleEn,
-      noPdf = false, noExtended = false,
+      noPdf = false, reportLevel: rawReportLevel,
       tz = "utc", mapView = "mag",
     } = body;
+    const reportLevel = normalizeReportLevel(rawReportLevel);
     const cacheKey = generationCacheKey({
       mode, lat, lon, mag, time, depth, place, magType, eventId,
       radiusKm, startTime, endTime, minMag, figNum, slug, titleZh, titleEn,
-      noPdf, noExtended, tz, mapView,
+      noPdf, reportLevel, tz, mapView,
     });
     const cached = getGenerationCache(cacheKey);
     if (cached) {
@@ -99,7 +100,6 @@ export async function POST(req: NextRequest) {
       args.push("--mag", String(mag));
       args.push("--time", time);
       if (depth != null) args.push("--depth", String(depth));
-      if (place) args.push("--place", place);
       if (magType) args.push("--mag-type", magType);
     } else if (mode === "eventid") {
       if (!eventId) {
@@ -119,6 +119,7 @@ export async function POST(req: NextRequest) {
     }
 
     args.push("--radius-km", String(radiusKm));
+    if (place) args.push("--place", place);
     if (startTime) args.push("--start-time", startTime);
     if (endTime) args.push("--end-time", endTime);
     args.push("--min-mag", String(minMag));
@@ -129,7 +130,7 @@ export async function POST(req: NextRequest) {
     if (titleEn) args.push("--title-en", titleEn);
 
     args.push("--no-pdf");
-    if (noExtended) args.push("--no-extended");
+    args.push("--report-level", reportLevel);
     if (tz) args.push("--tz", tz);
     if (mapView) args.push("--map-view", mapView);
 
@@ -196,6 +197,11 @@ export async function POST(req: NextRequest) {
 
 function generationCacheKey(value: any) {
   return createHash("sha1").update(JSON.stringify(value)).digest("hex");
+}
+
+function normalizeReportLevel(value: any) {
+  if (value === "simple" || value === "medium" || value === "full") return value;
+  return "simple";
 }
 
 function getGenerationCache(key: string) {

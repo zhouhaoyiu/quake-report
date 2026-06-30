@@ -47,6 +47,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import { parseQuakeText, type ParsedQuakeText } from "@/lib/quake-text-parser";
 import {
   Table,
   TableBody,
@@ -60,15 +61,18 @@ type Mode = "manual" | "eventid" | "recent";
 type SourcePanel = "catalog" | "input";
 type MapView = "mag" | "m4" | "time";
 type TimezoneMode = "utc" | "utc8" | "both";
+type ReportLevel = "simple" | "medium" | "full";
 
 interface SavedSettings {
   radiusKm: string;
   minMag: string;
   figNum: string;
   noPdf: boolean;
-  noExtended: boolean;
+  reportLevel: ReportLevel;
   tz: TimezoneMode;
   mapView: MapView;
+  recentMinMag: string;
+  recentDays: string;
   darkMode: boolean;
 }
 
@@ -78,9 +82,11 @@ const DEFAULT_SETTINGS: SavedSettings = {
   minMag: "3.0",
   figNum: "1",
   noPdf: false,
-  noExtended: false,
+  reportLevel: "simple",
   tz: "utc8",
   mapView: "mag",
+  recentMinMag: "6.0",
+  recentDays: "30",
   darkMode: false,
 };
 
@@ -89,6 +95,14 @@ const MAP_VIEW_OPTIONS: [MapView, string][] = [
   ["m4", "M4+"],
   ["time", "时间着色"],
 ];
+
+const REPORT_LEVEL_OPTIONS: [ReportLevel, string][] = [
+  ["simple", "最简"],
+  ["medium", "中等"],
+  ["full", "完整"],
+];
+const RECENT_MIN_MAG_OPTIONS = ["4.0", "5.0", "6.0", "7.0", "8.0", "9.0"];
+const RECENT_DAYS_OPTIONS = ["20", "30", "40", "50"];
 
 function readSavedSettings(): SavedSettings & { ready: boolean } {
   if (typeof window === "undefined") return { ...DEFAULT_SETTINGS, ready: false };
@@ -102,12 +116,21 @@ function readSavedSettings(): SavedSettings & { ready: boolean } {
       minMag: data.minMag ? String(data.minMag) : DEFAULT_SETTINGS.minMag,
       figNum: data.figNum ? String(data.figNum) : DEFAULT_SETTINGS.figNum,
       noPdf: typeof data.noPdf === "boolean" ? data.noPdf : DEFAULT_SETTINGS.noPdf,
-      noExtended: typeof data.noExtended === "boolean" ? data.noExtended : DEFAULT_SETTINGS.noExtended,
+      reportLevel:
+        data.reportLevel === "simple" || data.reportLevel === "medium" || data.reportLevel === "full"
+          ? data.reportLevel
+          : DEFAULT_SETTINGS.reportLevel,
       tz: data.tz === "utc" || data.tz === "utc8" || data.tz === "both" ? data.tz : DEFAULT_SETTINGS.tz,
       mapView:
         data.mapView === "mag" || data.mapView === "m4" || data.mapView === "time"
           ? data.mapView
           : DEFAULT_SETTINGS.mapView,
+      recentMinMag: RECENT_MIN_MAG_OPTIONS.includes(String(data.recentMinMag))
+        ? String(data.recentMinMag)
+        : DEFAULT_SETTINGS.recentMinMag,
+      recentDays: RECENT_DAYS_OPTIONS.includes(String(data.recentDays ?? data.recentLimit))
+        ? String(data.recentDays ?? data.recentLimit)
+        : DEFAULT_SETTINGS.recentDays,
       darkMode: typeof data.darkMode === "boolean" ? data.darkMode : DEFAULT_SETTINGS.darkMode,
       ready: true,
     };
@@ -156,6 +179,11 @@ interface RecentEvent {
   place: string;
 }
 
+interface CandidateEvent extends RecentEvent {
+  matchDistanceKm?: number;
+  matchScore?: number;
+}
+
 interface CatalogStatus {
   ok: boolean;
   rows?: number;
@@ -174,9 +202,15 @@ export default function Home() {
   const [lon, setLon] = useState("");
   const [mag, setMag] = useState("");
   const [time, setTime] = useState("");
-  const [depth, setDepth] = useState("10");
+  const [depth, setDepth] = useState("");
   const [place, setPlace] = useState("");
   const [magType, setMagType] = useState("Mw");
+  const [bulletinText, setBulletinText] = useState("");
+  const [bulletinParse, setBulletinParse] = useState<ParsedQuakeText | null>(null);
+  const [bulletinCandidates, setBulletinCandidates] = useState<CandidateEvent[]>([]);
+  const [bulletinCandidateLoading, setBulletinCandidateLoading] = useState(false);
+  const [bulletinCandidateError, setBulletinCandidateError] = useState("");
+  const [bulletinCandidateNote, setBulletinCandidateNote] = useState("");
 
   // eventid 模式
   const [eventId, setEventId] = useState("");
@@ -202,9 +236,11 @@ export default function Home() {
   const [figNum, setFigNum] = useState(DEFAULT_SETTINGS.figNum);
   const [slug, setSlug] = useState("");
   const [noPdf, setNoPdf] = useState(DEFAULT_SETTINGS.noPdf);
-  const [noExtended, setNoExtended] = useState(DEFAULT_SETTINGS.noExtended);
+  const [reportLevel, setReportLevel] = useState<ReportLevel>(DEFAULT_SETTINGS.reportLevel);
   const [tz, setTz] = useState<TimezoneMode>(DEFAULT_SETTINGS.tz);
   const [mapView, setMapView] = useState<MapView>(DEFAULT_SETTINGS.mapView);
+  const [recentMinMag, setRecentMinMag] = useState(DEFAULT_SETTINGS.recentMinMag);
+  const [recentDays, setRecentDays] = useState(DEFAULT_SETTINGS.recentDays);
 
   // 生成状态
   const [loading, setLoading] = useState(false);
@@ -237,7 +273,9 @@ export default function Home() {
     [mode, selectedRecentEvent, selectedCatalogMatches, selectedCatalogEvent]
   );
   const queuedEventLabel = mode === "recent" ? "最新" : "目录";
+  const reportPlace = place.trim();
   const mapViewLabel = mapView === "m4" ? "隐藏 M3-M4" : mapView === "time" ? "按时间着色" : "全量按震级";
+  const reportLevelLabel = reportLevel === "simple" ? "最简" : reportLevel === "medium" ? "中等" : "完整";
   const tzLabel = tz === "utc8" ? "北京时间" : tz === "both" ? "UTC+北京时间" : "UTC";
   const catalogPageSize = 10;
   const catalogPageCount = Math.max(1, Math.ceil(catalogSearchTotal / catalogPageSize));
@@ -286,9 +324,11 @@ export default function Home() {
     setMinMag(saved.minMag);
     setFigNum(saved.figNum);
     setNoPdf(saved.noPdf);
-    setNoExtended(saved.noExtended);
+    setReportLevel(saved.reportLevel);
     setTz(saved.tz);
     setMapView(saved.mapView);
+    setRecentMinMag(saved.recentMinMag);
+    setRecentDays(saved.recentDays);
     setDarkMode(saved.darkMode);
     setSettingsReady(true);
   }, []);
@@ -297,9 +337,9 @@ export default function Home() {
     if (!settingsReady) return;
     localStorage.setItem(
       SETTINGS_KEY,
-      JSON.stringify({ radiusKm, minMag, figNum, tz, mapView, noPdf, noExtended, darkMode })
+      JSON.stringify({ radiusKm, minMag, figNum, tz, mapView, recentMinMag, recentDays, noPdf, reportLevel, darkMode })
     );
-  }, [settingsReady, radiusKm, minMag, figNum, tz, mapView, noPdf, noExtended, darkMode]);
+  }, [settingsReady, radiusKm, minMag, figNum, tz, mapView, recentMinMag, recentDays, noPdf, reportLevel, darkMode]);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", darkMode);
@@ -363,6 +403,51 @@ export default function Home() {
     };
   }, [catalogSearchQuery, catalogSearchPage]);
 
+  useEffect(() => {
+    const parsed = bulletinParse;
+    if (!parsed || !needsCandidateFallback(parsed) || !hasCandidateSearchSeed(parsed)) {
+      setBulletinCandidates([]);
+      setBulletinCandidateLoading(false);
+      setBulletinCandidateError("");
+      setBulletinCandidateNote("");
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setBulletinCandidateLoading(true);
+      setBulletinCandidateError("");
+      try {
+        const params = new URLSearchParams({ radiusKm: radiusKm || "300" });
+        if (parsed.latitude != null) params.set("lat", String(parsed.latitude));
+        if (parsed.longitude != null) params.set("lon", String(parsed.longitude));
+        if (parsed.magnitude != null) params.set("mag", String(parsed.magnitude));
+        if (parsed.timeUtc) params.set("timeUtc", parsed.timeUtc);
+        if (parsed.place) params.set("text", parsed.place);
+        const r = await fetch(`/api/quake/candidates?${params}`, { signal: controller.signal });
+        const j = await r.json();
+        if (!j.ok) throw new Error(j.error || "候选匹配失败");
+        setBulletinCandidates(j.events || []);
+        setBulletinCandidateNote(j.note || "");
+      } catch (e: any) {
+        if (e?.name !== "AbortError") {
+          setBulletinCandidates([]);
+          setBulletinCandidateError(e?.message || String(e));
+          setBulletinCandidateNote("");
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setBulletinCandidateLoading(false);
+        }
+      }
+    }, 500);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [bulletinParse, radiusKm]);
+
   const submitCatalogSearch = useCallback(() => {
     setCatalogSearchPage(1);
     setCatalogSearchQuery(catalogSearch);
@@ -392,6 +477,7 @@ export default function Home() {
   const chooseRecentEvent = useCallback((ev: RecentEvent) => {
     setSelectedEventId(ev.eventId);
     setSelectedCatalogEvent(null);
+    setPlace("");
     resetGeneratedResult();
   }, [resetGeneratedResult]);
 
@@ -401,6 +487,7 @@ export default function Home() {
     setEventId(ev.eventId);
     setSelectedEventId("");
     setSelectedCatalogEvent(ev);
+    setPlace("");
     resetGeneratedResult();
     toast({
       title: "已填入事件",
@@ -408,14 +495,66 @@ export default function Home() {
     });
   }, [resetGeneratedResult, toast]);
 
+  const chooseBulletinCandidate = useCallback((ev: CandidateEvent) => {
+    setSourcePanel("input");
+    setMode("eventid");
+    setEventId(ev.eventId);
+    setSelectedEventId("");
+    setSelectedCatalogEvent(ev);
+    resetGeneratedResult();
+    toast({
+      title: "已确认候选事件",
+      description: `${formatEventTime(ev.time)} · M${ev.mag.toFixed(1)} · ${ev.eventId}`,
+    });
+  }, [resetGeneratedResult, toast]);
+
+  const applyParsedQuakeText = useCallback((parsed: ParsedQuakeText) => {
+    if (parsed.latitude != null) setLat(formatParsedNumber(parsed.latitude, 4));
+    if (parsed.longitude != null) setLon(formatParsedNumber(parsed.longitude, 4));
+    if (parsed.magnitude != null) setMag(formatParsedNumber(parsed.magnitude, 1));
+    if (parsed.depthKm != null) setDepth(formatParsedNumber(parsed.depthKm, 1));
+    if (parsed.timeUtc) setTime(parsed.timeUtc);
+    if (parsed.place) setPlace(parsed.place);
+    if (parsed.magType) setMagType(parsed.magType);
+    resetGeneratedResult();
+  }, [resetGeneratedResult]);
+
+  const parseBulletinText = useCallback((value: string, notify = false) => {
+    setBulletinText(value);
+    if (!value.trim()) {
+      setBulletinParse(null);
+      return;
+    }
+    const parsed = parseQuakeText(value);
+    setBulletinParse(parsed);
+    applyParsedQuakeText(parsed);
+    if (!notify) return;
+    if (parsed.missing.length) {
+      toast({
+        variant: "destructive",
+        title: "无法完整提取",
+        description: `缺少：${parsed.missing.join("、")}；候选找不到时，补全表单后可直接生成`,
+      });
+    } else {
+      toast({
+        title: "已提取参数",
+        description: parsed.assumedYear
+          ? `原文未写年份，已按 ${parsed.assumedYear} 年处理，请确认发震时间`
+          : "纬度、经度、震级和发震时间已填入手动输入表单",
+      });
+    }
+  }, [applyParsedQuakeText, toast]);
+
   function resetSettings() {
     setRadiusKm("200");
     setMinMag("3.0");
     setFigNum("1");
     setNoPdf(false);
-    setNoExtended(false);
+    setReportLevel("simple");
     setTz("utc8");
     setMapView("mag");
+    setRecentMinMag(DEFAULT_SETTINGS.recentMinMag);
+    setRecentDays(DEFAULT_SETTINGS.recentDays);
     setDarkMode(false);
     setCatalogCount(null);
     localStorage.removeItem(SETTINGS_KEY);
@@ -430,10 +569,11 @@ export default function Home() {
       figNum,
       slug: slug || undefined,
       noPdf,
-      noExtended,
+      reportLevel,
       tz,
       mapView,
     };
+    if (reportPlace) body.place = reportPlace;
 
     if (mode === "manual") {
       if (!lat || !lon || !mag || !time) {
@@ -449,7 +589,6 @@ export default function Home() {
       body.mag = Number(mag);
       body.time = time;
       if (depth) body.depth = Number(depth);
-      if (place) body.place = place;
       if (magType) body.magType = magType;
     } else if (mode === "eventid") {
       if (!eventId) {
@@ -506,7 +645,12 @@ export default function Home() {
   async function loadRecentEvents() {
     setRecentLoading(true);
     try {
-      const r = await fetch("/api/quake/recent?days=30&minMag=6.0&limit=30");
+      const params = new URLSearchParams({
+        days: recentDays,
+        minMag: recentMinMag,
+        limit: "50",
+      });
+      const r = await fetch(`/api/quake/recent?${params}`);
       const j = await r.json();
       if (j.ok) {
         setRecentEvents(j.events);
@@ -517,7 +661,7 @@ export default function Home() {
           chooseRecentEvent(latest);
           toast({
             title: `找到 ${j.events.length} 个事件`,
-            description: `已自动选取最新事件：M${latest.mag} ${latest.place}${j.cacheHit ? "（缓存）" : ""}`,
+            description: `近 ${recentDays} 天 M≥${recentMinMag}；已自动选取最新事件：M${latest.mag} ${latest.place}${j.cacheHit ? "（缓存）" : ""}`,
           });
         }
       } else {
@@ -820,7 +964,7 @@ export default function Home() {
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs text-[#76695d] dark:text-[#b7aa9b]">当前选中</span>
             <span className="font-medium text-[#2d241c] dark:text-[#f4eee5]">
-              M{queuedEvent.mag.toFixed(1)} {queuedEvent.place}
+              M{queuedEvent.mag.toFixed(1)} {reportPlace || queuedEvent.place}
             </span>
             <Badge variant="outline" className="h-5 bg-[#2d241c] text-[#fff8ee] border-[#2d241c] dark:bg-[#f4eee5] dark:text-[#171411] dark:border-[#f4eee5]">
               {queuedEventLabel}
@@ -838,22 +982,32 @@ export default function Home() {
         <Globe2 className="w-4 h-4 text-[#5a4b3f] dark:text-[#d8cbbb]" />
         查询与输出参数
       </div>
-      <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-[110px_96px_96px_minmax(240px,1fr)]">
-        <div className="w-28">
+      <div className="grid gap-2 sm:grid-cols-6 xl:grid-cols-[110px_96px_96px_minmax(220px,1fr)_minmax(220px,1fr)]">
+        <div className="sm:col-span-2 xl:col-span-1">
           <Label htmlFor="radius" className="text-xs">查询半径 km</Label>
           <Input id="radius" className="h-8" placeholder="200" value={radiusKm} onChange={(e) => setRadiusKm(e.target.value)} />
         </div>
-        <div className="w-24">
+        <div className="sm:col-span-2 xl:col-span-1">
           <Label htmlFor="minMag" className="text-xs">最小震级</Label>
           <Input id="minMag" className="h-8" placeholder="3.0" value={minMag} onChange={(e) => setMinMag(e.target.value)} />
         </div>
-        <div className="w-24">
+        <div className="sm:col-span-2 xl:col-span-1">
           <Label htmlFor="figNum" className="text-xs">图编号</Label>
           <Input id="figNum" className="h-8" placeholder="1" value={figNum} onChange={(e) => setFigNum(e.target.value)} />
         </div>
-        <div className="min-w-[260px] flex-1">
+        <div className="min-w-0 sm:col-span-3 xl:col-span-1">
           <Label htmlFor="slug" className="text-xs">输出文件名 (不含扩展名)</Label>
-          <Input id="slug" className="h-8" placeholder={defaultSlugPlaceholder} value={slug} onChange={(e) => setSlug(e.target.value)} />
+          <Input id="slug" className="h-8" placeholder={`例：${defaultSlugPlaceholder}`} value={slug} onChange={(e) => setSlug(e.target.value)} />
+        </div>
+        <div className="min-w-0 sm:col-span-3 xl:col-span-1">
+          <Label htmlFor="place" className="text-xs">报告地震名称 (可选)</Label>
+          <Input
+            id="place"
+            className="h-8"
+            placeholder={queuedEvent?.place ? `例：${queuedEvent.place}` : "例：默认使用事件原始地名"}
+            value={place}
+            onChange={(e) => setPlace(e.target.value)}
+          />
         </div>
       </div>
       <div className="mt-2 flex flex-wrap items-end gap-2">
@@ -891,6 +1045,7 @@ export default function Home() {
         <span>半径 {radiusKm || "-"} km</span>
         <span>M≥{minMag || "-"}</span>
         <span>地图：{mapViewLabel}</span>
+        <span>报告：{reportLevelLabel}</span>
         <span>{noPdf ? "跳过 PDF" : "生成 PDF"}</span>
         <span>时区：{tzLabel}</span>
         <span>目录量：{catalogCount == null ? "未预估" : `${catalogCount.toLocaleString()} 条`}</span>
@@ -905,26 +1060,26 @@ export default function Home() {
     <div className={`${darkMode ? "dark" : ""} min-h-screen pb-20 lg:h-screen lg:overflow-hidden lg:pb-0 flex flex-col bg-[#f7f1e8] text-[#2d241c] dark:bg-[#171411] dark:text-[#f4eee5]`}>
       {/* ===== Header ===== */}
       <header className="border-b border-[#ded4c6] bg-[#fbf7ef]/95 backdrop-blur sticky top-0 z-30 dark:border-[#3a332c] dark:bg-[#171411]/95">
-        <div className="max-w-[1680px] mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-[#2d241c] flex items-center justify-center dark:bg-[#f4eee5]">
+        <div className="max-w-[1680px] mx-auto px-3 py-3 flex items-center justify-between gap-2 sm:px-4">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+            <div className="w-9 h-9 shrink-0 rounded-lg bg-[#2d241c] flex items-center justify-center dark:bg-[#f4eee5]">
               <Activity className="w-5 h-5 text-[#fff8ee] dark:text-[#171411]" />
             </div>
-            <div>
-              <h1 className="text-base font-semibold text-[#2d241c] dark:text-[#f4eee5]">
+            <div className="min-w-0">
+              <h1 className="truncate text-base font-semibold text-[#2d241c] dark:text-[#f4eee5]">
                 地震活动报告生成器
               </h1>
-              <p className="text-xs text-[#76695d] dark:text-[#b7aa9b]">
+              <p className="hidden truncate text-xs text-[#76695d] dark:text-[#b7aa9b] sm:block">
                 多源目录核对 · 活动断层背景 · Word/PDF 输出
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 shrink-0 items-center gap-2">
             <Link
               href="/guide"
-              className="inline-flex h-9 items-center gap-1 rounded-md border border-[#ded4c6] bg-[#fffaf2] px-3 text-xs font-medium text-[#4f4237] hover:bg-[#f5ecdf] dark:border-[#3a332c] dark:bg-[#211c17] dark:text-[#e8ddcf] dark:hover:bg-[#2b251f]"
+              className="inline-flex h-9 shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-[#ded4c6] bg-[#fffaf2] px-3 text-xs font-medium text-[#4f4237] hover:bg-[#f5ecdf] dark:border-[#3a332c] dark:bg-[#211c17] dark:text-[#e8ddcf] dark:hover:bg-[#2b251f]"
             >
-              <BookOpen className="h-3.5 w-3.5" />
+              <BookOpen className="h-3.5 w-3.5 shrink-0" />
               使用教程
             </Link>
             <span className="hidden xl:inline text-xs text-[#76695d] dark:text-[#b7aa9b]">
@@ -945,18 +1100,6 @@ export default function Home() {
                   </span>
                 </span>
               )}
-              <Badge variant="outline" className="bg-[#fffaf2] text-[#4f4237] border-[#ded4c6] dark:bg-[#211c17] dark:text-[#e8ddcf] dark:border-[#3a332c]">
-                <Calendar className="w-3 h-3 mr-1" />
-                USGS FDSN
-              </Badge>
-              <Badge variant="outline" className="bg-[#fffaf2] text-[#4f4237] border-[#ded4c6] dark:bg-[#211c17] dark:text-[#e8ddcf] dark:border-[#3a332c]">
-                <Globe2 className="w-3 h-3 mr-1" />
-                EMSC
-              </Badge>
-              <Badge variant="outline" className="bg-[#fffaf2] text-[#4f4237] border-[#ded4c6] dark:bg-[#211c17] dark:text-[#e8ddcf] dark:border-[#3a332c]">
-                <Layers className="w-3 h-3 mr-1" />
-                GEM
-              </Badge>
             </div>
             <Button
               type="button"
@@ -978,7 +1121,7 @@ export default function Home() {
                 <Settings className="w-4 h-4" />
               </Button>
               {settingsOpen && (
-                <div className="absolute right-0 top-11 z-50 w-[320px] rounded-xl border border-[#ded4c6] bg-[#fffdf8] p-3 text-sm shadow-xl dark:border-[#3a332c] dark:bg-[#1c1814]">
+                <div className="absolute right-0 top-11 z-50 w-[min(320px,calc(100vw-24px))] rounded-xl border border-[#ded4c6] bg-[#fffdf8] p-3 text-sm shadow-xl dark:border-[#3a332c] dark:bg-[#1c1814]">
                   <div className="mb-3">
                     <div className="font-semibold text-[#2d241c] dark:text-[#f4eee5]">长期设置</div>
                     <div className="mt-1 text-xs text-[#76695d] dark:text-[#b7aa9b]">
@@ -1014,13 +1157,56 @@ export default function Home() {
                         ))}
                       </div>
                     </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <Label htmlFor="settings-recent-min-mag" className="mb-1 block text-xs">大震起步震级</Label>
+                        <Select value={recentMinMag} onValueChange={setRecentMinMag}>
+                          <SelectTrigger id="settings-recent-min-mag" className="h-8">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {RECENT_MIN_MAG_OPTIONS.map((value) => (
+                              <SelectItem key={value} value={value}>
+                                M≥{Number(value)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label htmlFor="settings-recent-days" className="mb-1 block text-xs">大震查询天数</Label>
+                        <Select value={recentDays} onValueChange={setRecentDays}>
+                          <SelectTrigger id="settings-recent-days" className="h-8">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {RECENT_DAYS_OPTIONS.map((value) => (
+                              <SelectItem key={value} value={value}>
+                                {value} 天
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
                     <div className="flex h-9 items-center justify-between rounded-md border border-[#ded4c6] bg-[#fffaf2] px-3 dark:border-[#3a332c] dark:bg-[#211c17]">
                       <Label htmlFor="settings-no-pdf" className="text-xs">不生成 PDF</Label>
                       <Switch id="settings-no-pdf" checked={noPdf} onCheckedChange={setNoPdf} />
                     </div>
-                    <div className="flex h-9 items-center justify-between rounded-md border border-[#ded4c6] bg-[#fffaf2] px-3 dark:border-[#3a332c] dark:bg-[#211c17]">
-                      <Label htmlFor="settings-no-extended" className="text-xs">简版报告</Label>
-                      <Switch id="settings-no-extended" checked={noExtended} onCheckedChange={setNoExtended} />
+                    <div>
+                      <Label htmlFor="settings-report-level" className="mb-1 block text-xs">报告复杂度</Label>
+                      <Select value={reportLevel} onValueChange={(v) => setReportLevel(v as ReportLevel)}>
+                        <SelectTrigger id="settings-report-level" className="h-8">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {REPORT_LEVEL_OPTIONS.map(([value, label]) => (
+                            <SelectItem key={value} value={value}>
+                              {label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div className="rounded-md bg-[#fffaf2] px-3 py-2 text-xs text-[#76695d] dark:bg-[#211c17] dark:text-[#b7aa9b]">
                       内网/本地目录：服务端检测到本地 SQLite 目录时会优先用于搜索和预估；否则自动走 USGS。
@@ -1044,8 +1230,8 @@ export default function Home() {
                 震中信息来源
               </CardTitle>
             </CardHeader>
-            <CardContent className="px-4 lg:flex lg:min-h-0 lg:flex-1">
-              <Tabs value={sourcePanel} onValueChange={(value) => setSourcePanel(value as SourcePanel)} className="lg:min-h-0 lg:flex-1">
+            <CardContent className="px-4 lg:flex lg:min-h-0 lg:flex-1 lg:overflow-hidden">
+              <Tabs value={sourcePanel} onValueChange={(value) => setSourcePanel(value as SourcePanel)} className="lg:h-full lg:min-h-0 lg:flex-1">
                 <TabsList className="grid grid-cols-2 w-full bg-[#efe6d8] text-[#6f6256] dark:bg-[#2b251f] dark:text-[#b7aa9b]">
                   <TabsTrigger value="input" className="text-xs data-[state=active]:bg-[#2d241c] data-[state=active]:text-[#fff8ee] dark:data-[state=active]:bg-[#f4eee5] dark:data-[state=active]:text-[#171411]">
                     输入方式
@@ -1055,7 +1241,7 @@ export default function Home() {
                   </TabsTrigger>
                 </TabsList>
 
-                <TabsContent value="catalog" className="mt-2">
+                <TabsContent value="catalog" className="mt-2 min-h-0 max-h-[calc(100dvh-220px)] overflow-y-auto pr-1 lg:max-h-none">
                   <div className="rounded-xl border border-[#ded4c6] bg-[#fffdf8] p-2.5 dark:border-[#3a332c] dark:bg-[#1c1814]">
                     <Label htmlFor="catalogSearch" className="text-xs font-medium">
                       全量目录搜索
@@ -1206,7 +1392,7 @@ export default function Home() {
                   </div>
                 </TabsContent>
 
-                <TabsContent value="input" className="mt-2 lg:min-h-0">
+                <TabsContent value="input" className="mt-2 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
               <Tabs value={mode} onValueChange={handleModeChange} className="lg:min-h-0 lg:h-full">
                 <TabsList className="grid grid-cols-3 w-full bg-[#efe6d8] text-[#6f6256] dark:bg-[#2b251f] dark:text-[#b7aa9b]">
                   <TabsTrigger value="manual" className="text-xs data-[state=active]:bg-[#2d241c] data-[state=active]:text-[#fff8ee] dark:data-[state=active]:bg-[#f4eee5] dark:data-[state=active]:text-[#171411]">
@@ -1222,6 +1408,68 @@ export default function Home() {
 
                 {/* manual 模式 */}
                 <TabsContent value="manual" className="space-y-2 mt-3">
+                  <div>
+                    <div className="flex items-center justify-between gap-2">
+                      <Label htmlFor="bulletinText" className="text-xs">测定文本自动提取</Label>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 px-2 text-xs"
+                        onClick={() => parseBulletinText(bulletinText, true)}
+                      >
+                        <Search className="mr-1 h-3 w-3" />
+                        提取
+                      </Button>
+                    </div>
+                    <textarea
+                      id="bulletinText"
+                      rows={3}
+                      value={bulletinText}
+                      onChange={(e) => parseBulletinText(e.target.value)}
+                      placeholder="例：中国地震台网正式测定：06月25日06时30分，在日本本州东部附近海域(北纬40.20度，东经142.40度)发生6.9级地震，震源深度50公里。"
+                      className="mt-1 w-full resize-none rounded-md border border-[#ded4c6] bg-[#fffaf2] px-3 py-2 text-sm text-[#2d241c] placeholder:text-[#aaa096] outline-none transition focus-visible:border-[#8a7b6d] focus-visible:ring-2 focus-visible:ring-[#8a7b6d]/20 dark:border-[#3a332c] dark:bg-[#211c17] dark:text-[#f4eee5] dark:placeholder:text-[#756d64] dark:focus-visible:border-[#d8cbbb]"
+                    />
+                    {bulletinParse && (
+                      <p className={`mt-1 text-xs ${bulletinParse.missing.length ? "text-amber-700 dark:text-amber-300" : "text-green-700 dark:text-green-300"}`}>
+                        {bulletinParse.missing.length
+                          ? hasCandidateSearchSeed(bulletinParse)
+                            ? `已尽量提取，仍缺少：${bulletinParse.missing.join("、")}。可先从下方候选确认；没有候选时，补全表单后按当前输入生成。`
+                            : `已尽量提取，仍缺少：${bulletinParse.missing.join("、")}。请补全表单后按当前输入生成。`
+                          : bulletinParse.assumedYear
+                            ? `原文未写年份，已按 ${bulletinParse.assumedYear} 年暂填；请从下方候选确认，或手动修改发震时间。中文台网时间按北京时间换算为 UTC。`
+                            : "已自动提取必要参数；中文台网时间按北京时间换算为 UTC。"}
+                      </p>
+                    )}
+                    {needsCandidateFallback(bulletinParse) && hasCandidateSearchSeed(bulletinParse) && (
+                      <div className="mt-2 rounded-md border border-[#ded4c6] bg-[#fffaf2] text-xs dark:border-[#3a332c] dark:bg-[#211c17]">
+                        <div className="flex items-center justify-between gap-2 border-b border-[#ded4c6] px-3 py-2 text-[#76695d] dark:border-[#3a332c] dark:text-[#b7aa9b]">
+                          <span>信息不完整，按已提取信息匹配候选</span>
+                          {bulletinCandidateLoading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                        </div>
+                        {bulletinCandidateError ? (
+                          <div className="px-3 py-2 text-red-600 dark:text-red-300">{publicError(bulletinCandidateError)}</div>
+                        ) : bulletinCandidateLoading && bulletinCandidates.length === 0 ? (
+                          <div className="px-3 py-2 text-[#76695d] dark:text-[#b7aa9b]">正在查询本地目录候选...</div>
+                        ) : bulletinCandidates.length ? (
+                          <div className="max-h-56 overflow-y-auto">
+                            {bulletinCandidates.map((ev) => (
+                              <CandidateEventButton key={ev.eventId} event={ev} onChoose={chooseBulletinCandidate} />
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="px-3 py-2 text-[#76695d] dark:text-[#b7aa9b]">
+                            信息不全且未匹配到候选。请补全纬度、经度、震级和发震时间，系统会按当前输入直接生成报告。
+                          </div>
+                        )}
+                        {bulletinCandidateNote && (
+                          <div className="border-t border-[#ded4c6] px-3 py-1.5 text-[#76695d] dark:border-[#3a332c] dark:text-[#b7aa9b]">
+                            {bulletinCandidateNote}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <div>
                       <Label htmlFor="lat" className="text-xs">纬度 Latitude</Label>
@@ -1250,7 +1498,7 @@ export default function Home() {
                       <Label htmlFor="mag" className="text-xs">震级 Magnitude</Label>
                       <Input
                         id="mag"
-                        placeholder="7.0"
+                        placeholder="例：7.0"
                         value={mag}
                         onChange={(e) => setMag(e.target.value)}
                       />
@@ -1262,21 +1510,21 @@ export default function Home() {
                     </Label>
                     <Input
                       id="time"
-                      placeholder="2026-06-25T14:17:00Z"
+                      placeholder="例：2026-06-25T14:17:00Z"
                       value={time}
                       onChange={(e) => setTime(e.target.value)}
                     />
                   </div>
                   <details open className="rounded-lg border border-[#ded4c6] bg-[#fffdf8] p-2 text-xs dark:border-[#3a332c] dark:bg-[#1c1814]">
                     <summary className="cursor-pointer font-medium text-[#5a4b3f] dark:text-[#d8cbbb]">
-                      高级参数：深度、震级类型、地名
+                      高级参数：深度、震级类型
                     </summary>
-                    <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <div>
                         <Label htmlFor="depth" className="text-xs">深度 km</Label>
                         <Input
                           id="depth"
-                          placeholder="10"
+                          placeholder="例：10"
                           value={depth}
                           onChange={(e) => setDepth(e.target.value)}
                         />
@@ -1296,15 +1544,6 @@ export default function Home() {
                           </SelectContent>
                         </Select>
                       </div>
-                      <div>
-                        <Label htmlFor="place" className="text-xs">地名 (可选)</Label>
-                        <Input
-                          id="place"
-                          placeholder="Honshu, Japan"
-                          value={place}
-                          onChange={(e) => setPlace(e.target.value)}
-                        />
-                      </div>
                     </div>
                   </details>
                 </TabsContent>
@@ -1317,11 +1556,12 @@ export default function Home() {
                     </Label>
                     <Input
                       id="eventId"
-                      placeholder="us7000xxxx"
+                      placeholder="例：us7000xxxx"
                       value={eventId}
                       onChange={(e) => {
                         setEventId(e.target.value);
                         setSelectedCatalogEvent(null);
+                        setPlace("");
                       }}
                     />
                     <p className="text-xs text-[#76695d] mt-1 dark:text-[#b7aa9b]">
@@ -1345,7 +1585,7 @@ export default function Home() {
                     ) : (
                       <Search className="w-4 h-4 mr-2" />
                     )}
-                    拉取近 30 天 M≥6.0 地震
+                    拉取近 {recentDays} 天 M≥{Number(recentMinMag)} 地震
                   </Button>
                   {recentEvents.length > 0 && (
                     <div className="max-h-[min(52vh,520px)] overflow-hidden border rounded-md border-[#ded4c6] lg:min-h-0 lg:flex-1 lg:max-h-none dark:border-[#3a332c]">
@@ -1648,7 +1888,28 @@ export default function Home() {
         <div className="max-w-[1680px] mx-auto px-4 py-3 flex flex-col md:flex-row items-center justify-between gap-2 text-xs text-[#76695d] dark:text-[#b7aa9b]">
           <div className="flex items-center gap-2">
             <Calendar className="w-3 h-3" />
-            数据源：USGS FDSN · EMSC/SeismicPortal · GEM Global Active Faults · Natural Earth/天地图
+            <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+              数据源：
+              <a className="hover:text-[#2d241c] hover:underline dark:hover:text-[#f4eee5]" href="https://earthquake.usgs.gov/fdsnws/event/1/" target="_blank" rel="noreferrer">
+                USGS FDSN
+              </a>
+              <span>·</span>
+              <a className="hover:text-[#2d241c] hover:underline dark:hover:text-[#f4eee5]" href="https://www.seismicportal.eu/fdsnws/event/1/" target="_blank" rel="noreferrer">
+                EMSC/SeismicPortal
+              </a>
+              <span>·</span>
+              <a className="hover:text-[#2d241c] hover:underline dark:hover:text-[#f4eee5]" href="https://github.com/GEMScienceTools/gem-global-active-faults" target="_blank" rel="noreferrer">
+                GEM Global Active Faults
+              </a>
+              <span>·</span>
+              <a className="hover:text-[#2d241c] hover:underline dark:hover:text-[#f4eee5]" href="https://www.naturalearthdata.com/" target="_blank" rel="noreferrer">
+                Natural Earth
+              </a>
+              <span>/</span>
+              <a className="hover:text-[#2d241c] hover:underline dark:hover:text-[#f4eee5]" href="https://www.tianditu.gov.cn/" target="_blank" rel="noreferrer">
+                天地图
+              </a>
+            </span>
           </div>
           <div>目录覆盖 1900 至今 · 默认 M≥3.0 · 距离按震中大圆距离计算</div>
         </div>
@@ -1657,9 +1918,54 @@ export default function Home() {
   );
 }
 
+function formatParsedNumber(value: number, digits: number) {
+  return Number(value.toFixed(digits)).toString();
+}
+
 function formatEventTime(value: string) {
   return value.slice(0, 16).replace("T", " ");
 }
+
+function needsCandidateFallback(parsed: ParsedQuakeText | null) {
+  return Boolean(parsed && (parsed.assumedYear || parsed.missing.length));
+}
+
+function hasCandidateSearchSeed(parsed: ParsedQuakeText | null) {
+  return Boolean(parsed && ((parsed.latitude != null && parsed.longitude != null) || parsed.place));
+}
+
+const CandidateEventButton = memo(function CandidateEventButton({
+  event,
+  onChoose,
+}: {
+  event: CandidateEvent;
+  onChoose: (event: CandidateEvent) => void;
+}) {
+  const place = event.place || `${event.latitude.toFixed(2)}°, ${event.longitude.toFixed(2)}°`;
+  const distance = event.matchDistanceKm == null ? "" : `距提取震中 ${event.matchDistanceKm.toFixed(1)} km`;
+
+  return (
+    <button
+      type="button"
+      onClick={() => onChoose(event)}
+      className="block w-full border-b border-[#ded4c6] px-3 py-2 text-left last:border-b-0 hover:bg-[#f5ecdf] focus:outline-none focus:ring-2 focus:ring-[#2d241c] dark:border-[#3a332c] dark:hover:bg-[#2b251f] dark:focus:ring-[#f4eee5]"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px] text-[#76695d] dark:text-[#b7aa9b]">
+            <span>UTC {formatEventTime(event.time)}</span>
+            {distance && <span>{distance}</span>}
+          </div>
+          <div className="mt-1 text-sm leading-snug text-[#2d241c] dark:text-[#f4eee5]">{place}</div>
+          <div className="mt-1 font-mono text-[11px] text-[#76695d] dark:text-[#b7aa9b]">{event.eventId}</div>
+        </div>
+        <Badge variant={event.mag >= 7 ? "destructive" : event.mag >= 6 ? "default" : "secondary"} className="shrink-0">
+          M{event.mag.toFixed(1)}
+        </Badge>
+      </div>
+    </button>
+  );
+});
 
 const CatalogEventButton = memo(function CatalogEventButton({
   event,
@@ -1680,7 +1986,7 @@ const CatalogEventButton = memo(function CatalogEventButton({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-mono text-xs text-[#76695d] dark:text-[#b7aa9b]">
-              {formatEventTime(event.time)}
+              UTC {formatEventTime(event.time)}
             </span>
             <span className="text-xs text-[#9b8d7f] dark:text-[#807469]">
               {event.depth.toFixed(1)} km

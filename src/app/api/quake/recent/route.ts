@@ -16,9 +16,12 @@ const USGS_FDSN = "https://earthquake.usgs.gov/fdsnws/event/1/query";
 export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
-    const days = Number(url.searchParams.get("days") || 30);
-    const minMag = Number(url.searchParams.get("minMag") || 6.0);
-    const limit = Number(url.searchParams.get("limit") || 30);
+    const requestedDays = Number(url.searchParams.get("days") || 30);
+    const requestedMinMag = Number(url.searchParams.get("minMag") || 6.0);
+    const requestedLimit = Number(url.searchParams.get("limit") || 30);
+    const days = [20, 30, 40, 50].includes(requestedDays) ? requestedDays : 30;
+    const minMag = [4, 5, 6, 7, 8, 9].includes(requestedMinMag) ? requestedMinMag : 6;
+    const limit = Math.min(50, Math.max(20, Math.floor(requestedLimit) || 30));
 
     const end = new Date();
     const start = new Date(end.getTime() - days * 86400 * 1000);

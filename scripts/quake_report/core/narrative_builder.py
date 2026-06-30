@@ -120,6 +120,12 @@ def _query_min_mag(stats: CatalogStats) -> float:
     return float(stats.query.min_magnitude)
 
 
+def _query_start_year(stats: CatalogStats) -> int:
+    if stats.query is None or stats.query.start_time is None:
+        return 1900
+    return int(stats.query.start_time.year)
+
+
 def _cumulative_counts_zh(stats: CatalogStats) -> str:
     min_mag = _query_min_mag(stats)
     parts = []
@@ -159,34 +165,25 @@ def build_narrative_zh(
     tz: Timezone = "utc",
 ) -> str:
     """构建中文叙述段落。"""
-    use_since_1950 = stats.use_since_1950
-
-    if use_since_1950:
-        head = f"以本次震中为圆心、{format_km(radius_km)} km 为半径，自 1950 年以来，"
-    else:
-        head = f"以本次震中为圆心、{format_km(radius_km)} km 为半径，USGS 目录共检索到"
-
-    if use_since_1950:
-        counts_zh = f"USGS 目录记录 {_cumulative_counts_zh(stats)}。"
-    else:
-        counts_zh = f"{_cumulative_counts_zh(stats)}。"
+    head = f"以本次震中为圆心、{format_km(radius_km)} km 为半径，自 {_query_start_year(stats)} 年以来，"
+    counts_zh = f"USGS 目录记录 {_cumulative_counts_zh(stats)}。"
 
     recent_parts = []
-    if not use_since_1950 and stats.nearest_m8 is not None:
+    if stats.nearest_m8 is not None:
         recent_parts.append(
-            f"距震中最近的 M8+ 记录是{_fmt_event_zh(stats.nearest_m8, mag_type, tz)}。"
+            f"距震中最近的 M8+ 记录为{_fmt_event_zh(stats.nearest_m8, mag_type, tz)}。"
         )
-    if not use_since_1950 and stats.nearest_m7 is not None:
+    if stats.nearest_m7 is not None:
         recent_parts.append(
-            f"距震中最近的 M7.0-M7.9 记录是{_fmt_event_zh(stats.nearest_m7, mag_type, tz)}。"
+            f"距震中最近的 M7.0-M7.9 记录为{_fmt_event_zh(stats.nearest_m7, mag_type, tz)}。"
         )
     if stats.nearest_m6 is not None:
         recent_parts.append(
-            f"距震中最近的 M6.0-M6.9 记录是{_fmt_event_zh(stats.nearest_m6, mag_type, tz)}。"
+            f"距震中最近的 M6.0-M6.9 记录为{_fmt_event_zh(stats.nearest_m6, mag_type, tz)}。"
         )
     if stats.nearest_m5 is not None:
         recent_parts.append(
-            f"距震中最近的 M5.0-M5.9 记录是{_fmt_event_zh(stats.nearest_m5, mag_type, tz)}。"
+            f"距震中最近的 M5.0-M5.9 记录为{_fmt_event_zh(stats.nearest_m5, mag_type, tz)}。"
         )
 
     tail = f"这些事件的空间分布见图 {fig_num}。"
@@ -206,27 +203,19 @@ def build_narrative_en(
     mag_type: str = "Mw",
     tz: Timezone = "utc",
 ) -> str:
-    use_since_1950 = stats.use_since_1950
-
-    if use_since_1950:
-        head = (
-            f"According to statistics, since 1950, within a {format_km(radius_km)}-km radius "
-            f"around the epicenter of this earthquake, "
-        )
-    else:
-        head = (
-            f"According to statistics, within a {format_km(radius_km)}-km radius "
-            f"around the epicenter of this earthquake, "
-        )
+    head = (
+        f"According to statistics, since {_query_start_year(stats)}, within a {format_km(radius_km)}-km radius "
+        f"around the epicenter of this earthquake, "
+    )
 
     counts_en = f"the USGS catalog contains {_cumulative_counts_en(stats)}. "
 
     recent_parts = []
-    if not use_since_1950 and stats.nearest_m8 is not None:
+    if stats.nearest_m8 is not None:
         recent_parts.append(
             f"The nearest earthquake of magnitude 8.0 and above was {_fmt_event_en(stats.nearest_m8, mag_type, tz)}. "
         )
-    if not use_since_1950 and stats.nearest_m7 is not None:
+    if stats.nearest_m7 is not None:
         recent_parts.append(
             f"The nearest earthquake of magnitude 7.0-8.0 was {_fmt_event_en(stats.nearest_m7, mag_type, tz)}. "
         )
@@ -262,7 +251,7 @@ def build_mainshock_summary_zh_v2(
     return (
         f"本次地震发生于{time_str}，震中位于{lat_str}、{lon_str}，"
         f"震源深度约 {mainshock.depth_km:.1f} km，震级为 {mainshock.mag_type} {mainshock.magnitude:.1f}。"
-        f"{(' USGS 地点名称为 ' + mainshock.place + '。') if mainshock.place else ''}"
+        f"{('地震名称为 ' + mainshock.place + '。') if mainshock.place else ''}"
     )
 
 
@@ -278,7 +267,7 @@ def build_mainshock_summary_en(
         f"with epicenter at {lat_str}, {lon_str}, "
         f"focal depth approximately {mainshock.depth_km:.1f} km, "
         f"magnitude {mainshock.mag_type} {mainshock.magnitude:.1f}."
-        + (f" Located at: {mainshock.place}." if mainshock.place else "")
+        + (f" Location name: {mainshock.place}." if mainshock.place else "")
     )
 
 
