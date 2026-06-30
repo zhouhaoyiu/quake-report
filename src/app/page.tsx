@@ -247,6 +247,8 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [countLoading, setCountLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("正在从 USGS 拉取地震目录...");
+  const controlsLocked = loading;
+  const controlsLockedRef = useRef(false);
   const [catalogCount, setCatalogCount] = useState<number | null>(null);
   const [progress, setProgress] = useState(0);
   const [elapsedSec, setElapsedSec] = useState(0);
@@ -256,6 +258,10 @@ export default function Home() {
   const [result, setResult] = useState<GenResult | null>(null);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfStatus, setPdfStatus] = useState("");
+
+  useEffect(() => {
+    controlsLockedRef.current = controlsLocked;
+  }, [controlsLocked]);
   const [darkMode, setDarkMode] = useState(DEFAULT_SETTINGS.darkMode);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsReady, setSettingsReady] = useState(false);
@@ -361,6 +367,10 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (controlsLocked) {
+      setCatalogSearchLoading(false);
+      return;
+    }
     const q = catalogSearchQuery.trim();
     if (q.length < 2) {
       setCatalogSearchLoading(false);
@@ -381,11 +391,12 @@ export default function Home() {
         });
         const j = await r.json();
         if (!j.ok) throw new Error(j.error || "搜索失败");
+        if (controlsLockedRef.current) return;
         setCatalogSearchResults(j.events || []);
         setCatalogSearchTotal(j.total || 0);
         setCatalogSearchNote(j.note || "");
       } catch (e: any) {
-        if (e?.name !== "AbortError") {
+        if (e?.name !== "AbortError" && !controlsLockedRef.current) {
           setCatalogSearchError(e?.message || String(e));
           setCatalogSearchResults([]);
           setCatalogSearchTotal(0);
@@ -402,9 +413,13 @@ export default function Home() {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [catalogSearchQuery, catalogSearchPage]);
+  }, [catalogSearchQuery, catalogSearchPage, controlsLocked]);
 
   useEffect(() => {
+    if (controlsLocked) {
+      setBulletinCandidateLoading(false);
+      return;
+    }
     const parsed = bulletinParse;
     if (!parsed || !needsCandidateFallback(parsed) || !hasCandidateSearchSeed(parsed)) {
       setBulletinCandidates([]);
@@ -428,10 +443,11 @@ export default function Home() {
         const r = await fetch(`/api/quake/candidates?${params}`, { signal: controller.signal });
         const j = await r.json();
         if (!j.ok) throw new Error(j.error || "候选匹配失败");
+        if (controlsLockedRef.current) return;
         setBulletinCandidates(j.events || []);
         setBulletinCandidateNote(j.note || "");
       } catch (e: any) {
-        if (e?.name !== "AbortError") {
+        if (e?.name !== "AbortError" && !controlsLockedRef.current) {
           setBulletinCandidates([]);
           setBulletinCandidateError(e?.message || String(e));
           setBulletinCandidateNote("");
@@ -447,18 +463,20 @@ export default function Home() {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [bulletinParse, radiusKm]);
+  }, [bulletinParse, radiusKm, controlsLocked]);
 
   const submitCatalogSearch = useCallback(() => {
+    if (controlsLocked) return;
     setCatalogSearchPage(1);
     setCatalogSearchQuery(catalogSearch);
-  }, [catalogSearch]);
+  }, [catalogSearch, controlsLocked]);
 
   const jumpCatalogPage = useCallback(() => {
+    if (controlsLocked) return;
     const page = Math.floor(Number(catalogPageInput));
     if (!Number.isFinite(page)) return;
     setCatalogSearchPage(Math.min(catalogPageCount, Math.max(1, page)));
-  }, [catalogPageInput, catalogPageCount]);
+  }, [catalogPageInput, catalogPageCount, controlsLocked]);
 
   const resetGeneratedResult = useCallback(() => {
     setResult(null);
@@ -471,18 +489,21 @@ export default function Home() {
   }, []);
 
   const handleModeChange = useCallback((value: string) => {
+    if (controlsLocked) return;
     setMode(value as Mode);
     resetGeneratedResult();
-  }, [resetGeneratedResult]);
+  }, [controlsLocked, resetGeneratedResult]);
 
   const chooseRecentEvent = useCallback((ev: RecentEvent) => {
+    if (controlsLocked) return;
     setSelectedEventId(ev.eventId);
     setSelectedCatalogEvent(null);
     setPlace("");
     resetGeneratedResult();
-  }, [resetGeneratedResult]);
+  }, [controlsLocked, resetGeneratedResult]);
 
   const chooseCatalogSearchEvent = useCallback((ev: RecentEvent) => {
+    if (controlsLocked) return;
     setSourcePanel("input");
     setMode("eventid");
     setEventId(ev.eventId);
@@ -494,9 +515,10 @@ export default function Home() {
       title: "已填入事件",
       description: `Event ID：${ev.eventId}`,
     });
-  }, [resetGeneratedResult, toast]);
+  }, [controlsLocked, resetGeneratedResult, toast]);
 
   const lookupEventId = useCallback(async () => {
+    if (controlsLocked) return;
     const id = eventId.trim();
     if (!id) {
       toast({
@@ -514,6 +536,7 @@ export default function Home() {
       if (!j.ok || !ev || String(ev.eventId).toLowerCase() !== id.toLowerCase()) {
         throw new Error("未找到这个 Event ID，请检查编号后重试");
       }
+      if (controlsLockedRef.current) return;
       setEventId(ev.eventId);
       setSelectedEventId("");
       setSelectedCatalogEvent(ev);
@@ -531,9 +554,10 @@ export default function Home() {
     } finally {
       setEventIdLookupLoading(false);
     }
-  }, [eventId, resetGeneratedResult, toast]);
+  }, [controlsLocked, eventId, resetGeneratedResult, toast]);
 
   const chooseBulletinCandidate = useCallback((ev: CandidateEvent) => {
+    if (controlsLocked) return;
     setSourcePanel("input");
     setMode("eventid");
     setEventId(ev.eventId);
@@ -544,9 +568,10 @@ export default function Home() {
       title: "已确认候选事件",
       description: `${formatEventTime(ev.time)} · M${ev.mag.toFixed(1)} · ${ev.eventId}`,
     });
-  }, [resetGeneratedResult, toast]);
+  }, [controlsLocked, resetGeneratedResult, toast]);
 
   const applyParsedQuakeText = useCallback((parsed: ParsedQuakeText) => {
+    if (controlsLocked) return;
     if (parsed.latitude != null) setLat(formatParsedNumber(parsed.latitude, 4));
     if (parsed.longitude != null) setLon(formatParsedNumber(parsed.longitude, 4));
     if (parsed.magnitude != null) setMag(formatParsedNumber(parsed.magnitude, 1));
@@ -555,9 +580,10 @@ export default function Home() {
     if (parsed.place) setPlace(parsed.place);
     if (parsed.magType) setMagType(parsed.magType);
     resetGeneratedResult();
-  }, [resetGeneratedResult]);
+  }, [controlsLocked, resetGeneratedResult]);
 
   const parseBulletinText = useCallback((value: string, notify = false) => {
+    if (controlsLocked) return;
     setBulletinText(value);
     if (!value.trim()) {
       setBulletinParse(null);
@@ -581,9 +607,10 @@ export default function Home() {
           : "纬度、经度、震级和发震时间已填入手动输入表单",
       });
     }
-  }, [applyParsedQuakeText, toast]);
+  }, [applyParsedQuakeText, controlsLocked, toast]);
 
   function resetSettings() {
+    if (controlsLocked) return;
     setRadiusKm("200");
     setMinMag("3.0");
     setFigNum("1");
@@ -656,6 +683,7 @@ export default function Home() {
   }
 
   async function estimateCatalogCount() {
+    if (controlsLocked) return;
     const body = buildRequestBody();
     if (!body) return;
     setCountLoading(true);
@@ -668,6 +696,7 @@ export default function Home() {
       });
       const cj = await cr.json();
       if (!cj.ok || typeof cj.count !== "number") throw new Error(cj.error || "预估失败");
+      if (controlsLockedRef.current) return;
       setCatalogCount(cj.count);
     } catch (e: any) {
       toast({
@@ -682,6 +711,7 @@ export default function Home() {
 
   // ---- 加载近 30 天大震 ----
   async function loadRecentEvents() {
+    if (controlsLocked) return;
     setRecentLoading(true);
     try {
       const params = new URLSearchParams({
@@ -691,6 +721,7 @@ export default function Home() {
       });
       const r = await fetch(`/api/quake/recent?${params}`);
       const j = await r.json();
+      if (controlsLockedRef.current) return;
       if (j.ok) {
         setRecentEvents(j.events);
         if (j.events.length > 0) {
@@ -740,6 +771,7 @@ export default function Home() {
       toast({ title: "已复用结果", description: "参数未变化，可直接下载" });
       return;
     }
+    controlsLockedRef.current = true;
     setLoading(true);
     setResult(null);
     setCatalogCount(null);
@@ -763,6 +795,7 @@ export default function Home() {
               `预计目录事件 ${cj.count.toLocaleString()} 条，出图和报告会明显变慢。是否继续生成？`
             );
             if (!ok) {
+              controlsLockedRef.current = false;
               setLoading(false);
               setProgress(0);
               return;
@@ -812,6 +845,7 @@ export default function Home() {
         description: publicError(e?.message || String(e)),
       });
     } finally {
+      controlsLockedRef.current = false;
       setLoading(false);
     }
   }
@@ -1156,6 +1190,7 @@ export default function Home() {
                 size="icon"
                 aria-label="长期设置"
                 onClick={() => setSettingsOpen((value) => !value)}
+                disabled={controlsLocked}
               >
                 <Settings className="w-4 h-4" />
               </Button>
@@ -1167,7 +1202,10 @@ export default function Home() {
                       保存到本机浏览器，下次打开自动沿用。
                     </div>
                   </div>
-                  <div className="space-y-3">
+                  <fieldset
+                    disabled={controlsLocked}
+                    className={`m-0 space-y-3 border-0 p-0 ${controlsLocked ? "pointer-events-none opacity-60" : ""}`}
+                  >
                     <div>
                       <Label htmlFor="settings-tz" className="mb-1 block text-xs">时间显示时区</Label>
                       <Select value={tz} onValueChange={(v) => setTz(v as typeof tz)}>
@@ -1250,7 +1288,7 @@ export default function Home() {
                     <div className="rounded-md bg-[#fffaf2] px-3 py-2 text-xs text-[#76695d] dark:bg-[#211c17] dark:text-[#b7aa9b]">
                       内网/本地目录：服务端检测到本地 SQLite 目录时会优先用于搜索和预估；否则自动走 USGS。
                     </div>
-                  </div>
+                  </fieldset>
                 </div>
               )}
             </div>
@@ -1270,7 +1308,11 @@ export default function Home() {
               </CardTitle>
             </CardHeader>
             <CardContent className="px-4 lg:flex lg:min-h-0 lg:flex-1 lg:overflow-hidden">
-              <Tabs value={sourcePanel} onValueChange={(value) => setSourcePanel(value as SourcePanel)} className="lg:h-full lg:min-h-0 lg:flex-1">
+              <fieldset
+                disabled={controlsLocked}
+                className={`m-0 min-w-0 flex-1 border-0 p-0 ${controlsLocked ? "pointer-events-none opacity-60" : ""}`}
+              >
+              <Tabs value={sourcePanel} onValueChange={(value) => !controlsLocked && setSourcePanel(value as SourcePanel)} className="lg:h-full lg:min-h-0 lg:flex-1">
                 <TabsList className="grid grid-cols-2 w-full bg-[#efe6d8] text-[#6f6256] dark:bg-[#2b251f] dark:text-[#b7aa9b]">
                   <TabsTrigger value="input" className="text-xs data-[state=active]:bg-[#2d241c] data-[state=active]:text-[#fff8ee] dark:data-[state=active]:bg-[#f4eee5] dark:data-[state=active]:text-[#171411]">
                     输入方式
@@ -1302,7 +1344,7 @@ export default function Home() {
                       <Button
                         type="button"
                         onClick={submitCatalogSearch}
-                        disabled={catalogSearchLoading || catalogSearch.trim().length < 2}
+                        disabled={controlsLocked || catalogSearchLoading || catalogSearch.trim().length < 2}
                         className="h-9 px-4 bg-[#2d241c] text-[#fff8ee] hover:bg-[#3a2d23] dark:bg-[#f4eee5] dark:text-[#171411]"
                       >
                         {catalogSearchLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
@@ -1629,7 +1671,7 @@ export default function Home() {
                     variant="outline"
                     className="w-full h-9"
                     onClick={loadRecentEvents}
-                    disabled={recentLoading}
+                    disabled={controlsLocked || recentLoading}
                   >
                     {recentLoading ? (
                       <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -1666,6 +1708,7 @@ export default function Home() {
               </Tabs>
                 </TabsContent>
               </Tabs>
+              </fieldset>
             </CardContent>
           </Card>
 
