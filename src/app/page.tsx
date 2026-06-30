@@ -1525,11 +1525,11 @@ export default function Home() {
                     {needsCandidateFallback(bulletinParse) && hasCandidateSearchSeed(bulletinParse) && (
                       <div className="mt-2 rounded-md border border-[#ded4c6] bg-[#fffaf2] text-xs dark:border-[#3a332c] dark:bg-[#211c17]">
                         <div className="flex items-center justify-between gap-2 border-b border-[#ded4c6] px-3 py-2 text-[#76695d] dark:border-[#3a332c] dark:text-[#b7aa9b]">
-                          <span>信息不完整，按已提取信息匹配候选</span>
+                          <span>信息不完整，候选确认（可选）</span>
                           {bulletinCandidateLoading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                         </div>
                         {bulletinCandidateError ? (
-                          <div className="px-3 py-2 text-red-600 dark:text-red-300">{publicError(bulletinCandidateError)}</div>
+                          <div className="px-3 py-2 text-amber-700 dark:text-amber-300">{candidateLookupMessage(bulletinCandidateError)}</div>
                         ) : bulletinCandidateLoading && bulletinCandidates.length === 0 ? (
                           <div className="px-3 py-2 text-[#76695d] dark:text-[#b7aa9b]">正在查询本地目录候选...</div>
                         ) : bulletinCandidates.length ? (
@@ -2018,6 +2018,12 @@ function formatParsedNumber(value: number, digits: number) {
 
 function formatEventTime(value: string) {
   return value.slice(0, 16).replace("T", " ");
+}
+
+function candidateLookupMessage(message?: string) {
+  if (!message) return "未匹配到候选，可按当前表单参数生成。";
+  if (/timed out|timeout|超时/i.test(message)) return "候选匹配超时；可手动确认参数后继续生成。";
+  return `候选匹配失败：${message}。可按当前表单参数生成。`;
 }
 
 function needsCandidateFallback(parsed: ParsedQuakeText | null) {
