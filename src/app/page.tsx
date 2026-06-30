@@ -498,11 +498,11 @@ export default function Home() {
 
   const lookupEventId = useCallback(async () => {
     const id = eventId.trim();
-    if (!isEventIdLike(id)) {
+    if (!id) {
       toast({
         variant: "destructive",
-        title: "Event ID 格式不对",
-        description: "请输入类似 us7000ndeb、nc75095651 这样的事件编号",
+        title: "缺少 Event ID",
+        description: "请输入事件编号后再查询",
       });
       return;
     }
@@ -512,7 +512,7 @@ export default function Home() {
       const j = await r.json();
       const ev = j.events?.[0];
       if (!j.ok || !ev || String(ev.eventId).toLowerCase() !== id.toLowerCase()) {
-        throw new Error("未找到这个 Event ID");
+        throw new Error("未找到这个 Event ID，请检查编号后重试");
       }
       setEventId(ev.eventId);
       setSelectedEventId("");
@@ -635,14 +635,6 @@ export default function Home() {
           variant: "destructive",
           title: "缺少 eventid",
           description: "请填写 USGS eventid",
-        });
-        return null;
-      }
-      if (!isEventIdLike(id)) {
-        toast({
-          variant: "destructive",
-          title: "Event ID 格式不对",
-          description: "请输入类似 us7000ndeb、nc75095651 这样的事件编号",
         });
         return null;
       }
@@ -1611,9 +1603,6 @@ export default function Home() {
                           setSelectedCatalogEvent(null);
                           setPlace("");
                         }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") lookupEventId();
-                        }}
                       />
                       <Button
                         type="button"
@@ -1986,11 +1975,6 @@ function formatParsedNumber(value: number, digits: number) {
 
 function formatEventTime(value: string) {
   return value.slice(0, 16).replace("T", " ");
-}
-
-function isEventIdLike(value: string) {
-  const id = value.trim();
-  return id.length >= 6 && /^[a-z0-9_-]+$/i.test(id) && /\d/.test(id);
 }
 
 function needsCandidateFallback(parsed: ParsedQuakeText | null) {
