@@ -3,15 +3,21 @@ import { spawn } from "child_process";
 import path from "path";
 import os from "os";
 import fs from "fs/promises";
-import { getReportFile } from "@/lib/report-file-store";
+import { getReportFile, MAX_REPORT_FILE_BYTES } from "@/lib/report-file-store";
 import { resolvePythonBinary } from "@/lib/python-runtime";
 
 const PROJECT_ROOT = process.cwd();
 const PDF_SCRIPT = path.join(PROJECT_ROOT, "scripts", "quake_report", "pdf_convert.py");
+const MAX_DOCX_DATA_URL_CHARS = Math.ceil(MAX_REPORT_FILE_BYTES / 3) * 4 + 4096;
 
 export async function POST(req: NextRequest) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "quake-pdf-"));
   try {
+    const contentLength = Number(req.headers.get("content-length") || 0);
+    if (contentLength > MAX_DOCX_DATA_URL_CHARS) {
+      return tooLarge();
+    }
+
     const body = await req.json();
     const fileName = safeBaseName(String(body.fileName || "report.docx")).replace(/\.docx$/i, ".pdf");
 
@@ -24,7 +30,11 @@ export async function POST(req: NextRequest) {
       const dataUrl = String(body.docxDataUrl || "");
       const m = dataUrl.match(/^data:[^,]+;base64,(.+)$/);
       if (!m) return NextResponse.json({ ok: false, error: "缺少 Word 文件数据" }, { status: 400 });
-      await fs.writeFile(docx, Buffer.from(m[1], "base64"));
+      const base64 = m[1].replace(/\s/g, "");
+      if (decodedBase64Bytes(base64) > MAX_REPORT_FILE_BYTES) return tooLarge();
+      const buffer = Buffer.from(base64, "base64");
+      if (buffer.length > MAX_REPORT_FILE_BYTES) return tooLarge();
+      await fs.writeFile(docx, buffer);
     }
 
     const result = await runPython(PDF_SCRIPT, [docx, "--output-dir", dir]);
@@ -46,6 +56,15 @@ export async function POST(req: NextRequest) {
   } finally {
     await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+function tooLarge() {
+  return NextResponse.json({ ok: false, error: "Word 文件过大，请重新生成或使用文件引用下载" }, { status: 413 });
+}
+
+function decodedBase64Bytes(value: string) {
+  const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
+  return Math.floor((value.length * 3) / 4) - padding;
 }
 
 function safeBaseName(name: string) {
