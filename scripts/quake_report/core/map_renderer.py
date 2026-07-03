@@ -60,6 +60,8 @@ def _ensure_font():
     if _FONT_REGISTERED:
         return
     for p in [
+        str(Path.home() / "Library/Fonts/simsun.ttc"),
+        "/usr/local/share/fonts/quake-report/simsun.ttc",
         "/System/Library/Fonts/PingFang.ttc",
         "/System/Library/Fonts/STHeiti Light.ttc",
         "/System/Library/Fonts/Supplemental/Songti.ttc",
@@ -87,6 +89,7 @@ def _ensure_font():
             except Exception:
                 pass
     preferred = [
+        "SimSun",
         "PingFang SC", "STHeiti",
         "Source Han Sans SC", "Noto Sans CJK SC", "Noto Sans SC",
         "WenQuanYi Micro Hei", "WenQuanYi Zen Hei", "Heiti SC",
@@ -96,7 +99,7 @@ def _ensure_font():
     families = [name for name in preferred if name in available] or ["DejaVu Sans"]
     plt.rcParams["font.family"] = "sans-serif"
     plt.rcParams["font.sans-serif"] = families
-    plt.rcParams["font.serif"] = ["Noto Serif SC", "DejaVu Serif"]
+    plt.rcParams["font.serif"] = ["SimSun", "Noto Serif SC", "DejaVu Serif"]
     plt.rcParams["axes.unicode_minus"] = False
     _FONT_PROP = fm.FontProperties(family=families)
     _FONT_PROP_BOLD = fm.FontProperties(family=families, weight="bold")

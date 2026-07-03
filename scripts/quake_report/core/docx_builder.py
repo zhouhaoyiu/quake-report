@@ -38,15 +38,13 @@ from .map_renderer import nearest_city_rows
 # 字体 & 样式常量
 # ============================================================================
 
-# 报告输出优先使用无版权争议的 Noto CJK。把实际可用字体写进 DOCX，
-# 避免 LibreOffice/WPS 在 PDF 转换时把中文 fallback 到奇怪字形。
+# DOCX 字体名固定写入，避免本地/服务器因已安装字体不同而生成不同格式。
 FANGSONG_FONT_NAMES = [
     "SimSun", "Songti SC", "Noto Serif CJK SC", "Noto Sans CJK SC", "Noto Sans SC",
     "STHeiti", "Heiti SC", "仿宋_GB2312", "FangSong_GB2312", "仿宋", "FangSong", "STFangsong",
 ]
 HEITI_FONT_NAMES = [
-    "Noto Sans CJK SC", "Noto Sans SC", "STHeiti", "Heiti SC",
-    "SimHei", "黑体", "Microsoft YaHei",
+    "SimSun", "Songti SC", "Noto Serif CJK SC", "Noto Sans CJK SC", "Noto Sans SC",
 ]
 REPORT_BLUE = RGBColor(0x1F, 0x4E, 0x79)
 MUTED_GRAY = RGBColor(0x66, 0x66, 0x66)
@@ -96,10 +94,6 @@ def _available_docx_fonts() -> set[str]:
 
 
 def _resolve_docx_font(font_names) -> str:
-    available = _available_docx_fonts()
-    for name in font_names:
-        if name in available:
-            return name
     return font_names[0]
 
 
@@ -108,6 +102,8 @@ def _chart_font():
     if _CHART_FONT is not None:
         return _CHART_FONT
     for path in [
+        str(Path.home() / "Library/Fonts/simsun.ttc"),
+        "/usr/local/share/fonts/quake-report/simsun.ttc",
         "/System/Library/Fonts/PingFang.ttc",
         "/System/Library/Fonts/STHeiti Light.ttc",
         str(Path.home() / "Library/Fonts/NotoSansCJKsc-Regular.otf"),
@@ -283,7 +279,7 @@ def _add_report_heading(doc, text: str, level: int = 1):
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.LEFT
     p.paragraph_format.keep_with_next = True
-    _set_auto_spacing(p, before=12 if level == 1 else 8, after=5, line=1.12)
+    _set_auto_spacing(p, before=8 if level == 1 else 6, after=4, line=1.0)
     p_pr = p._element.get_or_add_pPr()
     outline = OxmlElement("w:outlineLvl")
     outline.set(qn("w:val"), str(level - 1))
@@ -292,14 +288,14 @@ def _add_report_heading(doc, text: str, level: int = 1):
     _set_run_font(
         run,
         HEITI_FONT_NAMES,
-        size_pt={1: 14, 2: 11.5, 3: 10.5}.get(level, 10.5),
+        size_pt={1: 14, 2: 14, 3: 14}.get(level, 14),
         bold=True,
         color=REPORT_BLUE if level <= 2 else RGBColor(0x33, 0x33, 0x33),
     )
     return p
 
 
-def _add_report_paragraph(doc, text: str, *, size=10.5, bold=False, color=None, line=1.18):
+def _add_report_paragraph(doc, text: str, *, size=14, bold=False, color=None, line=1.0):
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
     _set_auto_spacing(p, before=0, after=5, line=line)
@@ -622,27 +618,30 @@ def _set_section_page_number_start(section, start: int = 1):
 # ============================================================================
 
 def _add_body_paragraph(doc, text: str, *, font_names=None, size_pt=14,
-                        indent_chars=2, line_pt=28.5, bold=False,
+                        indent_chars=2, line_pt=None, bold=False,
                         align=WD_ALIGN_PARAGRAPH.JUSTIFY):
-    """添加一个正文段落（默认仿宋 14pt，2字符首行缩进，固定 28.5pt 行距，两端对齐）。"""
+    """添加一个正文段落（四号，2字符首行缩进，单倍行距，两端对齐）。"""
     if font_names is None:
         font_names = FANGSONG_FONT_NAMES
     p = doc.add_paragraph()
     p.alignment = align
     if indent_chars > 0:
         _set_paragraph_first_line_indent_chars(p, indent_chars)
-    _set_paragraph_line_spacing_exact(p, line_pt)
+    if line_pt is None:
+        _set_auto_spacing(p, before=0, after=0, line=1.0)
+    else:
+        _set_paragraph_line_spacing_exact(p, line_pt)
     run = p.add_run(text)
     _set_run_font(run, font_names, size_pt=size_pt, bold=bold)
     return p
 
 
 def _add_heading(doc, text: str, level: int = 1):
-    """添加章节标题（黑体加粗）。"""
-    sizes = {1: 18, 2: 16, 3: 14}
+    """添加章节标题（宋体加粗）。"""
+    sizes = {1: 14, 2: 14, 3: 14}
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.LEFT
-    _set_paragraph_line_spacing_exact(p, 30.0)
+    _set_auto_spacing(p, before=6, after=4, line=1.0)
     # 在大纲级别（让目录能识别）
     pPr = p._element.get_or_add_pPr()
     outlineLvl = OxmlElement("w:outlineLvl")
@@ -883,15 +882,16 @@ def build_report(
     doc = Document()
 
     style_normal = doc.styles["Normal"]
-    style_normal.font.name = FANGSONG_FONT_NAMES[0]
-    style_normal.font.size = Pt(10.5)
+    style_normal.font.name = "Times New Roman"
+    style_normal.font.size = Pt(14)
     rpr = style_normal.element.get_or_add_rPr()
     rfonts = rpr.find(qn("w:rFonts"))
     if rfonts is None:
         rfonts = OxmlElement("w:rFonts")
         rpr.insert(0, rfonts)
-    for attr in ("ascii", "hAnsi", "cs", "eastAsia"):
-        rfonts.set(qn(f"w:{attr}"), FANGSONG_FONT_NAMES[0])
+    for attr in ("ascii", "hAnsi", "cs"):
+        rfonts.set(qn(f"w:{attr}"), "Times New Roman")
+    rfonts.set(qn("w:eastAsia"), FANGSONG_FONT_NAMES[0])
 
     section = doc.sections[0]
     section.page_height = Twips(16838)  # A4 override for Chinese report delivery
@@ -907,12 +907,10 @@ def build_report(
     # Title block
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    _set_auto_spacing(p, before=0, after=4, line=1.05)
+    _set_auto_spacing(p, before=0, after=4, line=1.0)
     run = p.add_run(title_zh)
     title_color = RGBColor(0, 0, 0) if report_level == "simple" else REPORT_BLUE
-    title_font = FANGSONG_FONT_NAMES if report_level == "simple" else HEITI_FONT_NAMES
-    title_size = 16.0 if report_level == "simple" else 16.5
-    _set_run_font(run, title_font, size_pt=title_size, bold=True, color=title_color)
+    _set_run_font(run, HEITI_FONT_NAMES, size_pt=16, bold=True, color=title_color)
 
     if report_level == "simple":
         intro = _source_text_intro(source_text) or build_mainshock_summary_zh_v2(mainshock, tz=tz)
@@ -1153,7 +1151,7 @@ def build_report(
         for chart_path, caption in _make_report_charts(catalog_df, output_docx_path, tz):
             _add_image_centered(doc, chart_path, width_cm=15.0)
             _add_centered_paragraph(doc, f"图{chart_num} {caption}",
-                                    font_names=FANGSONG_FONT_NAMES, size_pt=9.3, line_pt=15.0)
+                                    font_names=FANGSONG_FONT_NAMES, size_pt=10.5, bold=True, line_pt=16.0)
             _add_centered_paragraph(doc, _figure_source_note(stats, radius_km, tz),
                                     font_names=FANGSONG_FONT_NAMES, size_pt=7.5, line_pt=11.0)
             chart_num += 1

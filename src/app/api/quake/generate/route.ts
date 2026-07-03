@@ -60,9 +60,6 @@ const MIME: Record<string, string> = {
   ".pdf": "application/pdf",
   ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 };
-let jobQueue = Promise.resolve();
-let queuedJobs = 0;
-let runningJobs = 0;
 const GENERATION_CACHE_TTL_MS = 10 * 60_000;
 const generationCache: Map<string, { expires: number; result: any }> =
   ((globalThis as any).__quakeGenerationCache ||= new Map());
@@ -153,7 +150,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 调用 Python
-    const result = await enqueueJob(() => runPython(CLI_SCRIPT, args));
+    const result = await runPython(CLI_SCRIPT, args);
 
     // 读取摘要
     let summary: any = null;
@@ -311,21 +308,46 @@ function streamPython(script: string, args: string[], jsonPath: string, outputDi
   let stderr = "";
   let pending = "";
   const jobId = randomUUID();
+  let proc: ReturnType<typeof spawn> | null = null;
+  let finished = false;
 
   const stream = new ReadableStream({
     start(controller) {
-      const queuedAt = Date.now();
-      let startedAt = queuedAt;
-      let lastStageAt = queuedAt;
+      const startedAt = Date.now();
+      let lastStageAt = startedAt;
       const send = (payload: any) => {
-        controller.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
+        if (finished) return false;
+        try {
+          controller.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
+          return true;
+        } catch {
+          finished = true;
+          proc?.kill("SIGTERM");
+          void cleanupOutput(outputDir);
+          return false;
+        }
+      };
+      const finish = async (payload: any) => {
+        if (finished) return;
+        finished = true;
+        try {
+          controller.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
+        } catch {
+          // Browser disconnected; cleanup below is still required.
+        }
+        await cleanupOutput(outputDir);
+        try {
+          controller.close();
+        } catch {
+          // Already closed.
+        }
       };
       send({
         type: "job",
         jobId,
-        progress: 2,
-        message: "任务已进入生成队列",
-        queuePosition: getQueuePosition(),
+        progress: 5,
+        message: "任务开始执行",
+        waitSec: 0,
       });
 
       const onLine = (line: string) => {
@@ -368,21 +390,14 @@ function streamPython(script: string, args: string[], jsonPath: string, outputDi
         }
       };
 
-      enqueueJob(() => new Promise<void>((resolve) => {
-        startedAt = Date.now();
-        lastStageAt = startedAt;
-        send({
-          type: "progress",
-          progress: 5,
-          message: "任务开始执行",
-          waitSec: (startedAt - queuedAt) / 1000,
-        });
+      try {
         const python = resolvePythonBinary();
-        const proc = spawn(python, [script, ...args], {
+        const child = spawn(python, [script, ...args], {
           env: { ...process.env, PYTHONUNBUFFERED: "1" },
         });
+        proc = child;
 
-        proc.stdout.on("data", (d) => {
+        child.stdout.on("data", (d) => {
           const text = d.toString();
           stdout += text;
           pending += text;
@@ -390,19 +405,24 @@ function streamPython(script: string, args: string[], jsonPath: string, outputDi
           pending = lines.pop() || "";
           for (const line of lines) onLine(line);
         });
-        proc.stderr.on("data", (d) => {
+        child.stderr.on("data", (d) => {
           stderr += d.toString();
         });
-        proc.on("close", async (code) => {
+        child.on("error", async (e) => {
+          stderr += `${e?.message || String(e)}\n`;
+          await finish({
+            type: "done",
+            result: { ok: false, error: formatCliError({ stdout, stderr }) },
+          });
+        });
+        child.on("close", async (code) => {
+          if (finished) return;
           if (pending) onLine(pending);
           if (code !== 0) {
-            send({
+            await finish({
               type: "done",
               result: { ok: false, error: formatCliError({ stdout, stderr }) },
             });
-            await cleanupOutput(outputDir);
-            controller.close();
-            resolve();
             return;
           }
 
@@ -414,27 +434,26 @@ function streamPython(script: string, args: string[], jsonPath: string, outputDi
             if (!item) throw new Error("未获取到生成摘要");
             const result = buildResultPayload(item, canPdf);
             setGenerationCache(cacheKey, result);
-            send({
+            await finish({
               type: "done",
               progress: 100,
               result,
             });
           } catch (e: any) {
-            send({
+            await finish({
               type: "done",
               result: { ok: false, error: "生成失败：未获取到报告摘要" },
             });
-          } finally {
-            await cleanupOutput(outputDir);
-            controller.close();
-            resolve();
           }
         });
-      })).catch(async (e) => {
-        send({ type: "done", result: { ok: false, error: e?.message || String(e) } });
-        await cleanupOutput(outputDir);
-        controller.close();
-      });
+      } catch (e: any) {
+        void finish({ type: "done", result: { ok: false, error: e?.message || String(e) } });
+      }
+    },
+    cancel() {
+      finished = true;
+      proc?.kill("SIGTERM");
+      void cleanupOutput(outputDir);
     },
   });
 
@@ -444,26 +463,6 @@ function streamPython(script: string, args: string[], jsonPath: string, outputDi
       "Cache-Control": "no-store",
     },
   });
-}
-
-function enqueueJob<T>(work: () => Promise<T>) {
-  queuedJobs += 1;
-  const runWork = async () => {
-    queuedJobs = Math.max(0, queuedJobs - 1);
-    runningJobs += 1;
-    try {
-      return await work();
-    } finally {
-      runningJobs = Math.max(0, runningJobs - 1);
-    }
-  };
-  const run = jobQueue.then(runWork, runWork);
-  jobQueue = run.then(() => undefined, () => undefined);
-  return run;
-}
-
-function getQueuePosition() {
-  return runningJobs + queuedJobs + 1;
 }
 
 function formatCliError(result: { stdout: string; stderr: string }) {
@@ -496,12 +495,20 @@ function runPython(script: string, args: string[]): Promise<{
     const proc = spawn(python, [script, ...args], {
       env: { ...process.env, PYTHONUNBUFFERED: "1" },
     });
+    let settled = false;
     let stdout = "";
     let stderr = "";
+    const finish = (code: number) => {
+      if (settled) return;
+      settled = true;
+      resolve({ code, stdout, stderr });
+    };
     proc.stdout.on("data", (d) => (stdout += d.toString()));
     proc.stderr.on("data", (d) => (stderr += d.toString()));
-    proc.on("close", (code) =>
-      resolve({ code: code ?? -1, stdout, stderr })
-    );
+    proc.on("error", (e) => {
+      stderr += `${e?.message || String(e)}\n`;
+      finish(-1);
+    });
+    proc.on("close", (code) => finish(code ?? -1));
   });
 }
