@@ -204,7 +204,7 @@ export default function Home() {
   const [time, setTime] = useState("");
   const [depth, setDepth] = useState("");
   const [place, setPlace] = useState("");
-  const [magType, setMagType] = useState("Mw");
+  const [magType, setMagType] = useState("M");
   const [bulletinText, setBulletinText] = useState("");
   const [bulletinParse, setBulletinParse] = useState<ParsedQuakeText | null>(null);
   const [bulletinCandidates, setBulletinCandidates] = useState<CandidateEvent[]>([]);
@@ -266,7 +266,6 @@ export default function Home() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsReady, setSettingsReady] = useState(false);
   const [catalogStatus, setCatalogStatus] = useState<CatalogStatus | null>(null);
-  const lastGenerateRef = useRef<{ key: string; result: GenResult; count: number | null; expires: number } | null>(null);
   const selectedRecentEvent = useMemo(
     () => recentEvents.find((item) => item.eventId === selectedEventId),
     [recentEvents, selectedEventId]
@@ -294,32 +293,35 @@ export default function Home() {
     return Array.from({ length: Math.min(5, catalogPageCount) }, (_, index) => start + index);
   }, [safeCatalogPage, catalogPageCount]);
   const defaultSlugPlaceholder = useMemo(() => {
-    const yyyymm = (value: string) => {
+    const reportDate = (value: string) => {
       const d = new Date(value);
-      if (Number.isNaN(d.getTime())) return "YYYYMM";
-      return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+      if (Number.isNaN(d.getTime())) return "YYYY年M月D日";
+      const shown = tz === "utc" ? d : new Date(d.getTime() + 8 * 3600 * 1000);
+      return `${shown.getUTCFullYear()}年${shown.getUTCMonth() + 1}月${shown.getUTCDate()}日`;
+    };
+    const briefName = (value: string, m: number, name?: string) => {
+      const placeName = (name || "震中区").replace(/[\\/:*?"<>|]/g, "").trim() || "震中区";
+      return `${reportDate(value)}${placeName}M${m.toFixed(1)}地震震中区历史地震简报`;
     };
 
     if (mode === "manual") {
-      const la = Number(lat);
-      const lo = Number(lon);
       const m = Number(mag);
-      if (time && Number.isFinite(la) && Number.isFinite(lo) && Number.isFinite(m)) {
-        return `${yyyymm(time)}_M${m.toFixed(1)}_${la.toFixed(2)}_${lo.toFixed(2)}`;
+      if (time && Number.isFinite(m)) {
+        return briefName(time, m, reportPlace || "震中区");
       }
-      return "YYYYMM_M震级_纬度_经度";
+      return "YYYY年M月D日地名M震级地震震中区历史地震简报";
     }
 
     if (mode === "recent" && selectedRecentEvent) {
-      return `${yyyymm(selectedRecentEvent.time)}_${selectedRecentEvent.eventId}_M${selectedRecentEvent.mag.toFixed(1)}`;
+      return briefName(selectedRecentEvent.time, selectedRecentEvent.mag, reportPlace || selectedRecentEvent.place);
     }
 
     if (mode === "eventid" && selectedCatalogMatches && selectedCatalogEvent) {
-      return `${yyyymm(selectedCatalogEvent.time)}_${selectedCatalogEvent.eventId}_M${selectedCatalogEvent.mag.toFixed(1)}`;
+      return briefName(selectedCatalogEvent.time, selectedCatalogEvent.mag, reportPlace || selectedCatalogEvent.place);
     }
 
-    return eventId.trim() ? `YYYYMM_${eventId.trim()}_M震级` : "YYYYMM_eventid_M震级";
-  }, [mode, lat, lon, mag, time, selectedRecentEvent, selectedCatalogMatches, selectedCatalogEvent, eventId]);
+    return "YYYY年M月D日地名M震级地震震中区历史地震简报";
+  }, [mode, mag, time, selectedRecentEvent, selectedCatalogMatches, selectedCatalogEvent, reportPlace, tz]);
   const catalogSearchChips = useMemo(
     () => catalogSearchQuery.trim().split(/\s+/).filter(Boolean).slice(0, 8),
     [catalogSearchQuery]
@@ -655,6 +657,7 @@ export default function Home() {
       body.time = time;
       if (depth) body.depth = Number(depth);
       if (magType) body.magType = magType;
+      if (bulletinText.trim()) body.sourceText = bulletinText.trim();
     } else if (mode === "eventid") {
       const id = eventId.trim();
       if (!id) {
@@ -760,17 +763,6 @@ export default function Home() {
     }
     const body = buildRequestBody();
     if (!body) return;
-    const requestKey = JSON.stringify(body);
-    const now = Date.now();
-    const cached = lastGenerateRef.current;
-    if (cached?.key === requestKey && cached.expires > now) {
-      setResult(cached.result);
-      setCatalogCount(cached.count);
-      setMapPreview(null);
-      setCacheNote("参数未变，已复用最近一次生成结果");
-      toast({ title: "已复用结果", description: "参数未变化，可直接下载" });
-      return;
-    }
     controlsLockedRef.current = true;
     setLoading(true);
     setResult(null);
@@ -821,12 +813,6 @@ export default function Home() {
       setResult(j);
       if (j.ok) {
         setProgress(100);
-        lastGenerateRef.current = {
-          key: requestKey,
-          result: j,
-          count: catalogCount ?? j.stats?.total_count ?? j.stats?.n3 ?? null,
-          expires: Date.now() + 10 * 60_000,
-        };
         toast({
           title: j.cacheHit ? "已复用结果" : "生成成功",
           description: j.cacheHit ? "参数未变化，可直接下载" : "报告与图件已生成，可下载",
@@ -1622,6 +1608,7 @@ export default function Home() {
                             <SelectItem value="Mb">Mb (体波震级)</SelectItem>
                             <SelectItem value="Ml">Ml (近震震级)</SelectItem>
                             <SelectItem value="Mww">Mww (W-phase)</SelectItem>
+                            <SelectItem value="M">M (震级)</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>

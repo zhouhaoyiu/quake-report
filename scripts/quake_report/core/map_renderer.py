@@ -5,7 +5,7 @@
 - 黄色五角星 = 主震震中
 - 红色圆，按震级 5 档大小分级（3≤M<4 / 4≤M<5 / 5≤M<6 / 6≤M<7 / M≥7）
 - 黑色断层线（来自 GEM Global Active Faults）
-- 海岸线 + 国界（cartopy Natural Earth）
+- 陆地填色（Natural Earth）；国内事件叠加天地图/BOUL 边界
 - 以震中为中心的方位等距投影，让半径内点云保持圆形距离观感
 - 比例尺
 - 经纬度刻度
@@ -32,7 +32,6 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import FancyBboxPatch
 
 import cartopy.crs as ccrs
-import cartopy.feature as cfeature
 from cartopy.io import shapereader
 import shapefile
 
@@ -45,6 +44,8 @@ TIANDITU_CHINA_GEOJSON = CHINA_BOUNDARY_DIR / "tianditu_china_level2.geojson"
 TIANDITU_CHINA_CITIES = CHINA_BOUNDARY_DIR / "tianditu_china_cities.json"
 CHINA_BBOX = (70.0, 140.0, 3.0, 56.0)
 MAP_OUTPUT_UNIT = "中国地震局工程力学研究所 强震动观测中心"
+LAND_COLOR = "#f6d4a0"
+OCEAN_COLOR = "#abc7df"
 
 # ----------------------------------------------------------------------------
 # 中文字体注册
@@ -137,6 +138,34 @@ def _bbox_around(lat: float, lon: float, radius_km: float, pad_factor: float = 1
     )
 
 
+def _draw_land_fill(ax, proj):
+    geoms = _land_geometries()
+    ax.add_geometries(
+        geoms,
+        crs=proj,
+        facecolor="none",
+        edgecolor=LAND_COLOR,
+        linewidth=2.8,
+        antialiased=False,
+        zorder=0.9,
+    )
+    ax.add_geometries(
+        geoms,
+        crs=proj,
+        facecolor=LAND_COLOR,
+        edgecolor="none",
+        linewidth=0,
+        antialiased=False,
+        zorder=1,
+    )
+
+
+@lru_cache(maxsize=1)
+def _land_geometries():
+    shp = shapereader.natural_earth("10m", "physical", "land")
+    return tuple(shapereader.Reader(shp).geometries())
+
+
 def render_distribution_map(
     mainshock: MainShock,
     catalog: pd.DataFrame,
@@ -175,16 +204,12 @@ def render_distribution_map(
     ax.set_extent([min_lon, max_lon, min_lat, max_lat], crs=data_crs)
 
     # ---- 地理底图要素 ----
-    # 海洋 / 陆地填色（淡）
-    ax.add_feature(cfeature.OCEAN.with_scale("50m"), facecolor="#abc7df", zorder=0)
-    ax.add_feature(cfeature.LAND.with_scale("50m"), facecolor="#f6d4a0",
-                   edgecolor="#8a918d", linewidth=0.55, zorder=1)
-    if _intersects_bbox((min_lon, max_lon, min_lat, max_lat), CHINA_BBOX):
+    # 海洋用底色；陆地只填充，不画 Natural Earth 灰色边线。
+    ax.set_facecolor(OCEAN_COLOR)
+    _draw_land_fill(ax, data_crs)
+    is_china_map = _is_near_china_official_area(lon0, lat0)
+    if is_china_map:
         _draw_china_official_boundaries(ax, min_lon, max_lon, min_lat, max_lat, data_crs)
-    else:
-        # 国界；海岸线由 LAND 面边界绘制，避免面线不同源造成错位。
-        ax.add_feature(cfeature.BORDERS.with_scale("50m"), linewidth=0.6, edgecolor="#666",
-                       linestyle="--", zorder=2)
 
     # ---- 断层线（GEM） ----
     try:
@@ -198,7 +223,7 @@ def render_distribution_map(
         # 断层加载失败不应阻断出图
         print(f"[fault_loader] WARN: {e}")
 
-    if _intersects_bbox((min_lon, max_lon, min_lat, max_lat), CHINA_BBOX):
+    if is_china_map:
         _draw_china_city_labels(ax, min_lon, max_lon, min_lat, max_lat, lon0, lat0, data_crs)
     else:
         _draw_global_city_labels(ax, min_lon, max_lon, min_lat, max_lat, lon0, lat0, data_crs)
@@ -338,6 +363,39 @@ def _draw_scale_bar(ax, min_lon, max_lon, min_lat, max_lat, proj):
 
 def _intersects_bbox(a, b) -> bool:
     return not (a[1] < b[0] or a[0] > b[1] or a[3] < b[2] or a[2] > b[3])
+
+
+def _is_near_china_official_area(lon: float, lat: float) -> bool:
+    if not _intersects_bbox((lon, lon, lat, lat), CHINA_BBOX):
+        return False
+    area = _china_official_area()
+    if area is None:
+        return False
+    try:
+        from shapely.geometry import Point
+
+        point = Point(lon, lat)
+        return bool(area.covers(point) or area.distance(point) <= 0.6)
+    except Exception:
+        return False
+
+
+@lru_cache(maxsize=1)
+def _china_official_area():
+    if not TIANDITU_CHINA_GEOJSON.exists():
+        return None
+    try:
+        from shapely.geometry import shape
+        from shapely.ops import unary_union
+
+        geoms = [
+            shape(feature["geometry"])
+            for feature in _load_tianditu_china_geojson().get("features", [])
+            if feature.get("geometry")
+        ]
+        return unary_union(geoms) if geoms else None
+    except Exception:
+        return None
 
 
 def _china_boundary_files() -> list[Path]:

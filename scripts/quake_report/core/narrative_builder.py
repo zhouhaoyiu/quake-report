@@ -130,12 +130,12 @@ def _cumulative_counts_zh(stats: CatalogStats) -> str:
     min_mag = _query_min_mag(stats)
     parts = []
     if min_mag <= 3:
-        parts.append(f"M3+ 地震 {stats.n3} 次")
+        parts.append(f"3.0级以上地震{stats.n3} 次")
     else:
-        parts.append(f"{_fmt_mag_threshold(min_mag)} 地震 {stats.total_count} 次")
+        parts.append(f"{min_mag:.1f}级以上地震{stats.total_count} 次")
     for threshold, count in [(4, stats.n4), (5, stats.n5), (6, stats.n6), (7, stats.n7), (8, stats.n8)]:
         if min_mag < threshold:
-            parts.append(f"M{threshold}+ {count} 次")
+            parts.append(f"{threshold:.1f}级以上地震 {count} 次")
     return "，".join(parts)
 
 
@@ -165,28 +165,28 @@ def build_narrative_zh(
     tz: Timezone = "utc",
 ) -> str:
     """构建中文叙述段落。"""
-    head = f"以本次震中为圆心、{format_km(radius_km)} km 为半径，自 {_query_start_year(stats)} 年以来，"
-    counts_zh = f"USGS 目录记录 {_cumulative_counts_zh(stats)}。"
+    head = f"据统计，在本次地震的震中周围{format_km(radius_km)}千米以内，自 {_query_start_year(stats)} 年以来，发生"
+    counts_zh = f"{_cumulative_counts_zh(stats)}。"
 
     recent_parts = []
     if stats.nearest_m8 is not None:
         recent_parts.append(
-            f"距震中最近的 M8+ 记录为{_fmt_event_zh(stats.nearest_m8, mag_type, tz)}。"
+            f"距震中最近的 8.0级以上地震为{_fmt_event_zh(stats.nearest_m8, mag_type, tz)}。"
         )
     if stats.nearest_m7 is not None:
         recent_parts.append(
-            f"距震中最近的 M7.0-M7.9 记录为{_fmt_event_zh(stats.nearest_m7, mag_type, tz)}。"
+            f"距震中最近的 7.0-7.9 级地震为{_fmt_event_zh(stats.nearest_m7, mag_type, tz)}。"
         )
     if stats.nearest_m6 is not None:
         recent_parts.append(
-            f"距震中最近的 M6.0-M6.9 记录为{_fmt_event_zh(stats.nearest_m6, mag_type, tz)}。"
+            f"距震中最近的 6.0-6.9 级地震为{_fmt_event_zh(stats.nearest_m6, mag_type, tz)}。"
         )
     if stats.nearest_m5 is not None:
         recent_parts.append(
-            f"距震中最近的 M5.0-M5.9 记录为{_fmt_event_zh(stats.nearest_m5, mag_type, tz)}。"
+            f"距震中最近的 5.0-5.9 级地震为{_fmt_event_zh(stats.nearest_m5, mag_type, tz)}。"
         )
 
-    tail = f"这些事件的空间分布见图 {fig_num}。"
+    tail = f"此次地震的震中周围历史地震分布图见图 {fig_num}。"
 
     return head + counts_zh + "".join(recent_parts) + tail
 

@@ -10,7 +10,7 @@ export interface ParsedQuakeText {
   missing: string[];
 }
 
-const SUPPORTED_MAG_TYPES = new Set(["Mw", "Ms", "Mb", "Ml", "Mww"]);
+const SUPPORTED_MAG_TYPES = new Set(["Mw", "Ms", "Mb", "Ml", "Mww", "M"]);
 
 export function parseQuakeText(input: string, now = new Date()): ParsedQuakeText {
   const text = input.normalize("NFKC").replace(/\s+/g, " ").trim();
@@ -51,6 +51,7 @@ export function parseQuakeText(input: string, now = new Date()): ParsedQuakeText
     const enMag = text.match(/magnitude\s*([0-9](?:\.\d+)?)/i);
     const mag = zhMag?.[1] || enMag?.[1];
     if (mag) result.magnitude = Number(mag);
+    if (zhMag) result.magType = "M";
   }
 
   const depth = text.match(/(?:震源深度|深度|focal depth|depth)\s*(?:约|为|approximately|of|:)?\s*([0-9]+(?:\.\d+)?)\s*(?:公里|千米|km)/i);
@@ -81,7 +82,7 @@ function signed(value: number, negative: boolean) {
 
 function normalizeMagType(value: string) {
   const v = value.toLowerCase();
-  const normalized = v === "mww" ? "Mww" : v === "mw" ? "Mw" : v === "ms" ? "Ms" : v === "mb" ? "Mb" : v === "ml" ? "Ml" : "";
+  const normalized = v === "mww" ? "Mww" : v === "mw" ? "Mw" : v === "ms" ? "Ms" : v === "mb" ? "Mb" : v === "ml" ? "Ml" : v === "m" ? "M" : "";
   return SUPPORTED_MAG_TYPES.has(normalized) ? normalized : undefined;
 }
 

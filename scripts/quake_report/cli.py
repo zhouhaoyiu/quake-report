@@ -68,6 +68,7 @@ def generate_one(
     slug: str | None = None,
     title_zh: str | None = None,
     title_en: str | None = None,
+    source_text: str | None = None,
     output_dir: str = DOWNLOAD_DIR,
     also_pdf: bool = True,
     report_level: str = "simple",
@@ -88,7 +89,7 @@ def generate_one(
 
     # 1) slug
     if slug is None:
-        slug = _default_slug(mainshock)
+        slug = _default_slug(mainshock, tz)
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -166,7 +167,7 @@ def generate_one(
         fig_num=fig_num, title_zh=report_title_zh, title_en=title_en,
         radius_km=radius_km, report_level=report_level,
         tz=tz, supplemental=supplemental, removed_mainshock_count=removed_mainshock,
-        catalog_warnings=warnings,
+        catalog_warnings=warnings, source_text=source_text,
     )
 
     # 7) 转 PDF
@@ -196,13 +197,11 @@ def generate_one(
 # 默认 slug / title
 # ============================================================================
 
-def _default_slug(mainshock: MainShock) -> str:
-    y = mainshock.time_utc.year
-    m = mainshock.time_utc.month
-    event = "".join(c for c in (mainshock.event_id or "") if c.isalnum() or c in "-_")
-    if event and event not in {"manual", "csv"}:
-        return f"{y}{m:02d}_{event}_M{mainshock.magnitude:.1f}"
-    return f"{y}{m:02d}_M{mainshock.magnitude:.1f}_{mainshock.latitude:.2f}_{mainshock.longitude:.2f}"
+def _default_slug(mainshock: MainShock, tz: str = "utc") -> str:
+    t = _title_date(mainshock, tz)
+    place = (mainshock.place or "震中区").split(",")[0].strip()
+    place = "".join(c for c in place if c not in '\\/:*?"<>|').strip()[:32] or "震中区"
+    return f"{t.year}年{t.month}月{t.day}日{place}M{mainshock.magnitude:.1f}地震震中区历史地震简报"
 
 
 def _title_date(mainshock: MainShock, tz: str) -> datetime:
@@ -336,8 +335,8 @@ def build_argparser() -> argparse.ArgumentParser:
                    help="震源深度 km（默认 10.0）")
     p.add_argument("--place", type=str, default="",
                    help="震中地名（可选）")
-    p.add_argument("--mag-type", type=str, default="Mw",
-                   help="震级类型（默认 Mw）")
+    p.add_argument("--mag-type", type=str, default="M",
+                   help="震级类型（默认 M）")
 
     # eventid 模式
     p.add_argument("--event-id", type=str, help="USGS eventid（eventid 模式必填）")
@@ -368,6 +367,7 @@ def build_argparser() -> argparse.ArgumentParser:
                    help="图编号字符串（默认 '1'）")
     p.add_argument("--title-zh", type=str, default=None, help="报告中文标题")
     p.add_argument("--title-en", type=str, default=None, help="报告英文标题")
+    p.add_argument("--source-text", type=str, default=None, help="原始速报/短信文本，simple 报告首段会原文引用")
     p.add_argument("--output-dir", type=str, default=DOWNLOAD_DIR,
                    help=f"输出目录（默认 {DOWNLOAD_DIR}）")
     p.add_argument("--no-pdf", action="store_true",
@@ -439,6 +439,7 @@ def main(argv=None):
             slug=slug,
             title_zh=args.title_zh,
             title_en=args.title_en,
+            source_text=args.source_text,
             output_dir=args.output_dir,
             also_pdf=not args.no_pdf,
             report_level=report_level,

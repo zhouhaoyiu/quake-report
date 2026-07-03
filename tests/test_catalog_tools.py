@@ -3,6 +3,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import closing
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -14,9 +15,13 @@ sys.path.insert(0, str(SCRIPTS))
 
 import search_usgs_catalog
 import sync_usgs_catalog
+from quake_report.cli import _default_slug
 from quake_report.core.catalog_export import write_catalog_csv
+from quake_report.core.docx_builder import _source_text_intro
 from quake_report.core.formatting import format_km
 from quake_report.core.mainshock_helpers import apply_place_override
+from quake_report.core.narrative_builder import build_narrative_zh
+from quake_report.core.usgs_client import CatalogQuery, CatalogStats
 
 
 class CatalogToolTests(unittest.TestCase):
@@ -133,6 +138,46 @@ class CatalogToolTests(unittest.TestCase):
         self.assertIn(",99.98508823505868,", lines[2])
         self.assertIn("2020-01-01", lines[1])
         self.assertIn("2020-01-02", lines[2])
+
+    def test_default_slug_uses_report_timezone_chinese_brief_name(self):
+        shock = SimpleNamespace(
+            time_utc=datetime(2026, 7, 3, 4, 4, tzinfo=timezone.utc),
+            place="先岛诸岛",
+            magnitude=6.2,
+        )
+        self.assertEqual(
+            _default_slug(shock, "utc8"),
+            "2026年7月3日先岛诸岛M6.2地震震中区历史地震简报",
+        )
+
+    def test_source_text_intro_prefixes_bulletin_once(self):
+        text = "中国地震台网正式测定：07月03日12时04分，在先岛诸岛发生6.2级地震。"
+        self.assertEqual(_source_text_intro(text), f"据{text}")
+        self.assertEqual(_source_text_intro(f"据{text}"), f"据{text}")
+
+    def test_chinese_narrative_uses_brief_template_wording(self):
+        stats = CatalogStats(
+            n3=1542,
+            n4=1434,
+            n5=254,
+            n6=33,
+            n7=3,
+            n8=1,
+            total_count=1542,
+            query=CatalogQuery(26.23, 126.18),
+        )
+        text = build_narrative_zh(
+            SimpleNamespace(),
+            stats,
+            fig_num="1",
+            radius_km=200,
+            mag_type="Mw",
+            tz="utc8",
+        )
+        self.assertIn("据统计，在本次地震的震中周围200千米以内，自 1900 年以来，发生3.0级以上地震1542 次", text)
+        self.assertIn("4.0级以上地震 1434 次", text)
+        self.assertIn("此次地震的震中周围历史地震分布图见图 1。", text)
+        self.assertNotIn("USGS 目录记录", text)
 
 
 if __name__ == "__main__":

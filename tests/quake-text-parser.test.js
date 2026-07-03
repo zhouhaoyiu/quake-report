@@ -11,6 +11,7 @@ test("parses CENC style bulletin text", () => {
   expect(parsed.latitude).toBe(40.2);
   expect(parsed.longitude).toBe(142.4);
   expect(parsed.magnitude).toBe(6.9);
+  expect(parsed.magType).toBe("M");
   expect(parsed.depthKm).toBe(50);
   expect(parsed.timeUtc).toBe("2026-06-24T22:30:00Z");
   expect(parsed.assumedYear).toBe(2026);
@@ -25,6 +26,12 @@ test("does not mark explicit year as assumed", () => {
 
   expect(parsed.timeUtc).toBe("2025-06-24T22:30:00Z");
   expect(parsed.assumedYear).toBeUndefined();
+});
+
+test("normalizes plain M magnitude type", () => {
+  const parsed = parseQuakeText("M6.2 1.85N 127.40E depth 120 km 2026-07-03 10:31 UTC+8");
+  expect(parsed.magType).toBe("M");
+  expect(parsed.magnitude).toBe(6.2);
 });
 
 test("parses yearless CENC examples for candidate fallback", () => {
@@ -43,6 +50,7 @@ test("parses yearless CENC examples for candidate fallback", () => {
     expect(parsed.latitude).toBe(latitude);
     expect(parsed.longitude).toBe(longitude);
     expect(parsed.magnitude).toBe(magnitude);
+    expect(parsed.magType).toBe("M");
     expect(parsed.depthKm).toBe(depthKm);
     expect(parsed.timeUtc).toBe(timeUtc);
     expect(parsed.assumedYear).toBe(2026);

@@ -13,6 +13,7 @@
  *     "depth"?: number,
  *     "place"?: string,
  *     "magType"?: string,
+ *     "sourceText"?: string,
  *     "eventId"?: string,
  *     "radiusKm"?: number,
  *     "startTime"?: string,
@@ -47,6 +48,12 @@ import { resolvePythonBinary } from "@/lib/python-runtime";
 
 const PROJECT_ROOT = process.cwd();
 const CLI_SCRIPT = path.join(PROJECT_ROOT, "scripts", "quake_report", "cli.py");
+const REPORT_OUTPUT_SOURCES = [
+  CLI_SCRIPT,
+  path.join(PROJECT_ROOT, "scripts", "quake_report", "core", "docx_builder.py"),
+  path.join(PROJECT_ROOT, "scripts", "quake_report", "core", "map_renderer.py"),
+  path.join(PROJECT_ROOT, "scripts", "quake_report", "core", "narrative_builder.py"),
+];
 const MIME: Record<string, string> = {
   ".png": "image/png",
   ".csv": "text/csv; charset=utf-8",
@@ -65,7 +72,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const {
       mode = "manual",
-      lat, lon, mag, time, depth, place, magType,
+      lat, lon, mag, time, depth, place, magType, sourceText,
       eventId,
       radiusKm = 200, startTime, endTime, minMag = 3.0,
       figNum = "1", slug, titleZh, titleEn,
@@ -74,9 +81,9 @@ export async function POST(req: NextRequest) {
     } = body;
     const reportLevel = normalizeReportLevel(rawReportLevel);
     const cacheKey = generationCacheKey({
-      mode, lat, lon, mag, time, depth, place, magType, eventId,
+      mode, lat, lon, mag, time, depth, place, magType, sourceText, eventId,
       radiusKm, startTime, endTime, minMag, figNum, slug, titleZh, titleEn,
-      noPdf, reportLevel, tz, mapView,
+      noPdf, reportLevel, tz, mapView, outputVersion: reportOutputVersion(),
     });
     const cached = getGenerationCache(cacheKey);
     if (cached) {
@@ -120,6 +127,7 @@ export async function POST(req: NextRequest) {
 
     args.push("--radius-km", String(radiusKm));
     if (place) args.push("--place", place);
+    if (sourceText) args.push("--source-text", sourceText);
     if (startTime) args.push("--start-time", startTime);
     if (endTime) args.push("--end-time", endTime);
     args.push("--min-mag", String(minMag));
@@ -197,6 +205,12 @@ export async function POST(req: NextRequest) {
 
 function generationCacheKey(value: any) {
   return createHash("sha1").update(JSON.stringify(value)).digest("hex");
+}
+
+function reportOutputVersion() {
+  return REPORT_OUTPUT_SOURCES
+    .map((file) => `${path.basename(file)}:${fsSync.statSync(file).mtimeMs}`)
+    .join("|");
 }
 
 function normalizeReportLevel(value: any) {

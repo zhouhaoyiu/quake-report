@@ -41,8 +41,8 @@ from .map_renderer import nearest_city_rows
 # 报告输出优先使用无版权争议的 Noto CJK。把实际可用字体写进 DOCX，
 # 避免 LibreOffice/WPS 在 PDF 转换时把中文 fallback 到奇怪字形。
 FANGSONG_FONT_NAMES = [
-    "Noto Sans CJK SC", "Noto Sans SC", "STHeiti", "Heiti SC",
-    "Songti SC", "SimSun", "仿宋_GB2312", "FangSong_GB2312", "仿宋", "FangSong", "STFangsong",
+    "SimSun", "Songti SC", "Noto Serif CJK SC", "Noto Sans CJK SC", "Noto Sans SC",
+    "STHeiti", "Heiti SC", "仿宋_GB2312", "FangSong_GB2312", "仿宋", "FangSong", "STFangsong",
 ]
 HEITI_FONT_NAMES = [
     "Noto Sans CJK SC", "Noto Sans SC", "STHeiti", "Heiti SC",
@@ -52,6 +52,7 @@ REPORT_BLUE = RGBColor(0x1F, 0x4E, 0x79)
 MUTED_GRAY = RGBColor(0x66, 0x66, 0x66)
 LIGHT_BLUE = "EAF2F8"
 LIGHT_GRAY = "F3F5F7"
+REPORT_MAP_WIDTH_CM = 14.2
 
 _CHART_FONT = None
 
@@ -136,9 +137,9 @@ def _set_run_font(run, font_names, size_pt=None, bold=False, color=None):
         rpr.insert(0, rfonts)
     primary = _resolve_docx_font(tuple(font_names))
     run.font.name = primary
-    rfonts.set(qn("w:ascii"), primary)
-    rfonts.set(qn("w:hAnsi"), primary)
-    rfonts.set(qn("w:cs"), primary)
+    rfonts.set(qn("w:ascii"), "Times New Roman")
+    rfonts.set(qn("w:hAnsi"), "Times New Roman")
+    rfonts.set(qn("w:cs"), "Times New Roman")
     rfonts.set(qn("w:eastAsia"), primary)
 
     # 字号
@@ -298,10 +299,11 @@ def _add_report_heading(doc, text: str, level: int = 1):
     return p
 
 
-def _add_report_paragraph(doc, text: str, *, size=10.5, bold=False, color=None):
+def _add_report_paragraph(doc, text: str, *, size=10.5, bold=False, color=None, line=1.18):
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-    _set_auto_spacing(p, before=0, after=5, line=1.18)
+    _set_auto_spacing(p, before=0, after=5, line=line)
+    _set_paragraph_first_line_indent_chars(p, 2)
     run = p.add_run(text)
     _set_run_font(run, FANGSONG_FONT_NAMES, size_pt=size, bold=bold, color=color)
     return p
@@ -673,6 +675,13 @@ def _add_centered_paragraph(doc, text: str, *, font_names=None, size_pt=12,
     return p
 
 
+def _source_text_intro(source_text: str | None) -> str:
+    text = " ".join((source_text or "").split()).strip()
+    if not text:
+        return ""
+    return text if text.startswith("据") else f"据{text}"
+
+
 def _add_image_centered(doc, image_path: str, width_cm: float = 14.5):
     """添加居中图片。
 
@@ -854,6 +863,7 @@ def build_report(
     supplemental: SupplementalData | None = None,
     removed_mainshock_count: int = 0,
     catalog_warnings: list[str] | None = None,
+    source_text: str | None = None,
 ) -> str:
     """构建更紧凑的分析型 docx 报告。"""
     if report_level is None:
@@ -899,10 +909,14 @@ def build_report(
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _set_auto_spacing(p, before=0, after=4, line=1.05)
     run = p.add_run(title_zh)
-    _set_run_font(run, HEITI_FONT_NAMES, size_pt=16.5, bold=True, color=REPORT_BLUE)
+    title_color = RGBColor(0, 0, 0) if report_level == "simple" else REPORT_BLUE
+    title_font = FANGSONG_FONT_NAMES if report_level == "simple" else HEITI_FONT_NAMES
+    title_size = 16.0 if report_level == "simple" else 16.5
+    _set_run_font(run, title_font, size_pt=title_size, bold=True, color=title_color)
 
     if report_level == "simple":
-        _add_report_paragraph(doc, build_mainshock_summary_zh_v2(mainshock, tz=tz))
+        intro = _source_text_intro(source_text) or build_mainshock_summary_zh_v2(mainshock, tz=tz)
+        _add_report_paragraph(doc, intro, size=14, line=1.0)
         _add_report_paragraph(
             doc,
             build_narrative_zh(
@@ -913,13 +927,16 @@ def build_report(
                 mag_type=mainshock.mag_type,
                 tz=tz,
             ),
+            size=14,
+            line=1.0,
         )
-        _add_image_centered(doc, map_image_path, width_cm=15.8)
+        _add_image_centered(doc, map_image_path, width_cm=REPORT_MAP_WIDTH_CM)
         _add_centered_paragraph(
             doc,
-            f"图{fig_num} 震中周围历史地震分布图",
+            f"图 {fig_num} 震中周围历史地震分布图",
             font_names=FANGSONG_FONT_NAMES,
-            size_pt=9.5,
+            size_pt=10.5,
+            bold=True,
             line_pt=16.0,
         )
         os.makedirs(os.path.dirname(os.path.abspath(output_docx_path)), exist_ok=True)
@@ -977,7 +994,7 @@ def build_report(
     )
 
     _add_report_heading(doc, "一、事件概况", level=1)
-    _add_report_paragraph(doc, build_mainshock_summary_zh_v2(mainshock, tz=tz))
+    _add_report_paragraph(doc, _source_text_intro(source_text) or build_mainshock_summary_zh_v2(mainshock, tz=tz))
 
     _add_report_heading(doc, "二、数据来源", level=1)
     emsc_count = len(supplemental.emsc_catalog) if supplemental and not supplemental.emsc_catalog.empty else 0
@@ -1125,9 +1142,9 @@ def build_report(
             widths_cm=[5.0, 3.2, 4.8],
         )
 
-    _add_image_centered(doc, map_image_path, width_cm=15.8)
-    _add_centered_paragraph(doc, f"图{fig_num} 震中周围地震分布图",
-                            font_names=FANGSONG_FONT_NAMES, size_pt=9.5, line_pt=16.0)
+    _add_image_centered(doc, map_image_path, width_cm=REPORT_MAP_WIDTH_CM)
+    _add_centered_paragraph(doc, f"图 {fig_num} 震中周围历史地震分布图",
+                            font_names=FANGSONG_FONT_NAMES, size_pt=10.5, bold=True, line_pt=16.0)
     _add_centered_paragraph(doc, _figure_source_note(stats, radius_km, tz),
                             font_names=FANGSONG_FONT_NAMES, size_pt=7.5, line_pt=11.0)
 
