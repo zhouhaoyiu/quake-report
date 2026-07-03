@@ -284,8 +284,8 @@ def _draw_map_footer(fig, ax):
     fig.text(box.x0, y, f"产出单位：{MAP_OUTPUT_UNIT}",
              ha="left", va="center", fontsize=8.5, color="#333",
              fontproperties=_map_font())
-    fig.text((box.x0 + box.x1) / 2, y, today,
-             ha="center", va="center", fontsize=8.5, color="#333",
+    fig.text(box.x1, y, today,
+             ha="right", va="center", fontsize=8.5, color="#333",
              fontproperties=_map_font())
 
 
