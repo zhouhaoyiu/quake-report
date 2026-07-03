@@ -196,16 +196,21 @@ def sync_interval(
 ) -> int:
     count = fetch_count(start, end, min_mag)
     if count == 0:
-        print(f"  {start.date()}..{end.date()} count=0")
+        deleted = reconcile_interval(conn, start, end, min_mag, [])
+        conn.commit()
+        suffix = f" deleted_stale={deleted}" if deleted else ""
+        print(f"  {start.date()}..{end.date()} count=0{suffix}")
         return 0
     if count > limit:
         mid = start + (end - start) / 2
         return sync_interval(conn, start, mid, min_mag, limit) + sync_interval(conn, mid, end, min_mag, limit)
 
     rows = fetch_csv_rows(start, end, min_mag, limit)
+    deleted = reconcile_interval(conn, start, end, min_mag, rows)
     upsert_rows(conn, rows)
     conn.commit()
-    print(f"  {start.date()}..{end.date()} count={count} rows={len(rows)}")
+    suffix = f" deleted_stale={deleted}" if deleted else ""
+    print(f"  {start.date()}..{end.date()} count={count} rows={len(rows)}{suffix}")
     return len(rows)
 
 
@@ -271,6 +276,29 @@ def upsert_rows(conn: sqlite3.Connection, rows: list[dict[str, str]]) -> None:
     for row in rows:
         values.append(tuple(to_float(row.get(col)) if col in REAL_COLUMNS else row.get(col, "") for col in CSV_COLUMNS))
     conn.executemany(sql, values)
+
+
+def reconcile_interval(
+    conn: sqlite3.Connection,
+    start: dt.datetime,
+    end: dt.datetime,
+    min_mag: float,
+    rows: list[dict[str, str]],
+) -> int:
+    conn.execute("create temp table if not exists sync_ids (id text primary key)")
+    conn.execute("delete from sync_ids")
+    conn.executemany("insert or ignore into sync_ids(id) values(?)", ((row["id"],) for row in rows if row.get("id")))
+    cur = conn.execute(
+        """
+        delete from events
+        where time >= ?
+          and time < ?
+          and mag >= ?
+          and not exists (select 1 from sync_ids where sync_ids.id = events.id)
+        """,
+        (fmt(start), fmt(end), min_mag),
+    )
+    return cur.rowcount
 
 
 def export_csv_gz(conn: sqlite3.Connection, path: Path) -> None:

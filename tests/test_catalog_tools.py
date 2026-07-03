@@ -100,6 +100,19 @@ class CatalogToolTests(unittest.TestCase):
             analyzed = conn.execute("select count(*) from sqlite_stat1").fetchone()[0]
         self.assertGreater(analyzed, 0)
 
+    def test_reconcile_interval_removes_stale_rows_only_inside_window(self):
+        with closing(sqlite3.connect(self.db)) as conn:
+            deleted = sync_usgs_catalog.reconcile_interval(
+                conn,
+                sync_usgs_catalog.parse_utc("2008-05-12T06:00:00Z"),
+                sync_usgs_catalog.parse_utc("2008-05-12T07:15:00Z"),
+                3.0,
+                [{"id": "us1"}],
+            )
+            self.assertEqual(deleted, 1)
+            ids = [r[0] for r in conn.execute("select id from events order by id")]
+        self.assertEqual(ids, ["far", "us1"])
+
     def test_format_km_keeps_decimal_radius(self):
         self.assertEqual(format_km(200), "200")
         self.assertEqual(format_km(200.5), "200.5")
