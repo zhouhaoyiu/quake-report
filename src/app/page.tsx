@@ -2010,6 +2010,10 @@ function formatEventTime(value: string) {
 function candidateLookupMessage(message?: string) {
   if (!message) return "未匹配到候选，可按当前表单参数生成。";
   if (/timed out|timeout|超时/i.test(message)) return "候选匹配超时；可手动确认参数后继续生成。";
+  if (/Command failed|\/[\w.-]+\/|--spec-json|\.py\b|Traceback|JSONDecodeError/i.test(message)) {
+    return "候选匹配失败；可手动确认参数后继续生成。";
+  }
+  if (message.startsWith("候选匹配失败")) return `${message}。可按当前表单参数生成。`;
   return `候选匹配失败：${message}。可按当前表单参数生成。`;
 }
 

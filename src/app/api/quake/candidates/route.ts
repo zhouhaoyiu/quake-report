@@ -51,7 +51,7 @@ export async function GET(req: NextRequest) {
     const parsed = JSON.parse(stdout);
     return NextResponse.json(parsed?.ok ? parsed : { ok: true, events: [], note: "未找到候选事件" });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: publicError(e) }, { status: 500 });
+    return NextResponse.json({ ok: false, error: candidatePublicError(e) }, { status: 500 });
   }
 }
 
@@ -79,7 +79,11 @@ async function catalogDbPath() {
   return null;
 }
 
-function publicError(e: any) {
+export function candidatePublicError(e: any) {
   const message = e?.message || String(e);
-  return /timed out|timeout/i.test(message) ? "候选匹配超时，请手动补充年份或缩小半径" : message;
+  if (/timed out|timeout/i.test(message)) return "候选匹配超时，请手动补充年份或缩小半径";
+  if (/Command failed|\/[\w.-]+\/|--spec-json|\.py\b|Traceback|JSONDecodeError/i.test(message)) {
+    return "候选匹配失败，请手动确认参数后继续生成";
+  }
+  return message;
 }
