@@ -176,15 +176,15 @@ def render_distribution_map(
 
     # ---- 地理底图要素 ----
     # 海洋 / 陆地填色（淡）
-    ax.add_feature(cfeature.LAND.with_scale("50m"), facecolor="#f6d4a0", zorder=0)
     ax.add_feature(cfeature.OCEAN.with_scale("50m"), facecolor="#abc7df", zorder=0)
+    ax.add_feature(cfeature.LAND.with_scale("50m"), facecolor="#f6d4a0",
+                   edgecolor="#8a918d", linewidth=0.55, zorder=1)
     if _intersects_bbox((min_lon, max_lon, min_lat, max_lat), CHINA_BBOX):
         _draw_china_official_boundaries(ax, min_lon, max_lon, min_lat, max_lat, data_crs)
     else:
-        # 海岸线 + 国界
-        ax.add_feature(cfeature.COASTLINE.with_scale("50m"), linewidth=0.8, edgecolor="#444", zorder=1)
+        # 国界；海岸线由 LAND 面边界绘制，避免面线不同源造成错位。
         ax.add_feature(cfeature.BORDERS.with_scale("50m"), linewidth=0.6, edgecolor="#666",
-                       linestyle="--", zorder=1)
+                       linestyle="--", zorder=2)
 
     # ---- 断层线（GEM） ----
     try:
