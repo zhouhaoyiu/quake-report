@@ -238,6 +238,7 @@ function streamCachedResult(result: any) {
     headers: {
       "Content-Type": "application/x-ndjson; charset=utf-8",
       "Cache-Control": "no-store",
+      "X-Accel-Buffering": "no",
     },
   });
 }
@@ -461,6 +462,7 @@ function streamPython(script: string, args: string[], jsonPath: string, outputDi
     headers: {
       "Content-Type": "application/x-ndjson; charset=utf-8",
       "Cache-Control": "no-store",
+      "X-Accel-Buffering": "no",
     },
   });
 }

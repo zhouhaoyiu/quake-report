@@ -32,6 +32,7 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import FancyBboxPatch
 
 import cartopy.crs as ccrs
+import cartopy.feature as cfeature
 from cartopy.io import shapereader
 import shapefile
 
@@ -141,34 +142,6 @@ def _bbox_around(lat: float, lon: float, radius_km: float, pad_factor: float = 1
     )
 
 
-def _draw_land_fill(ax, proj):
-    geoms = _land_geometries()
-    ax.add_geometries(
-        geoms,
-        crs=proj,
-        facecolor="none",
-        edgecolor=LAND_COLOR,
-        linewidth=2.8,
-        antialiased=False,
-        zorder=0.9,
-    )
-    ax.add_geometries(
-        geoms,
-        crs=proj,
-        facecolor=LAND_COLOR,
-        edgecolor="none",
-        linewidth=0,
-        antialiased=False,
-        zorder=1,
-    )
-
-
-@lru_cache(maxsize=1)
-def _land_geometries():
-    shp = shapereader.natural_earth("10m", "physical", "land")
-    return tuple(shapereader.Reader(shp).geometries())
-
-
 def render_distribution_map(
     mainshock: MainShock,
     catalog: pd.DataFrame,
@@ -207,12 +180,15 @@ def render_distribution_map(
     ax.set_extent([min_lon, max_lon, min_lat, max_lat], crs=data_crs)
 
     # ---- 地理底图要素 ----
-    # 海洋用底色；陆地只填充，不画 Natural Earth 灰色边线。
     ax.set_facecolor(OCEAN_COLOR)
-    _draw_land_fill(ax, data_crs)
+    ax.add_feature(cfeature.OCEAN.with_scale("50m"), facecolor=OCEAN_COLOR, zorder=0)
+    ax.add_feature(cfeature.LAND.with_scale("50m"), facecolor=LAND_COLOR, edgecolor="none", zorder=1)
     is_china_map = _is_near_china_official_area(lon0, lat0)
     if is_china_map:
         _draw_china_official_boundaries(ax, min_lon, max_lon, min_lat, max_lat, data_crs)
+    else:
+        ax.add_feature(cfeature.COASTLINE.with_scale("50m"), linewidth=0.8, edgecolor="#444", zorder=1)
+        ax.add_feature(cfeature.BORDERS.with_scale("50m"), linewidth=0.6, edgecolor="#666", linestyle="--", zorder=1)
 
     # ---- 断层线（GEM） ----
     try:
