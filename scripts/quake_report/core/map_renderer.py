@@ -44,7 +44,7 @@ CHINA_BOUNDARY_DIR = PROJECT_ROOT / "data/china_boundaries"
 TIANDITU_CHINA_GEOJSON = CHINA_BOUNDARY_DIR / "tianditu_china_level2.geojson"
 TIANDITU_CHINA_CITIES = CHINA_BOUNDARY_DIR / "tianditu_china_cities.json"
 CHINA_BBOX = (70.0, 140.0, 3.0, 56.0)
-MAP_OUTPUT_UNIT = "中国地震局工程力学研究所"
+MAP_OUTPUT_UNIT = "中国地震局工程力学研究所 强震动观测中心"
 
 # ----------------------------------------------------------------------------
 # 中文字体注册
