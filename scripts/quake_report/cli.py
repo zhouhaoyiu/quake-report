@@ -128,15 +128,15 @@ def generate_one(
 
     # 4) 渲染地图
     map_path = os.path.join(output_dir, f"{slug}_map.png")
-    if title_zh is None:
-        title_zh = _default_title_zh(mainshock)
+    report_title_zh = title_zh or _default_title_zh(mainshock, tz)
+    map_title_zh = title_zh or _default_map_title_zh(mainshock, tz)
     if title_en is None:
         title_en = _default_title_en(mainshock)
     print(f"\n[2/5] 渲染震中分布图 → {map_path}")
     render_distribution_map(
         mainshock, catalog, query,
         output_path=map_path,
-        title_zh=title_zh,
+        title_zh=map_title_zh,
         title_en=title_en,
         map_view=map_view,
     )
@@ -163,7 +163,7 @@ def generate_one(
     print(f"\n[4/5] 生成 docx 报告 → {docx_path}")
     build_report(
         mainshock, stats, catalog, map_path, docx_path,
-        fig_num=fig_num, title_zh=title_zh, title_en=title_en,
+        fig_num=fig_num, title_zh=report_title_zh, title_en=title_en,
         radius_km=radius_km, report_level=report_level,
         tz=tz, supplemental=supplemental, removed_mainshock_count=removed_mainshock,
         catalog_warnings=warnings,
@@ -205,12 +205,22 @@ def _default_slug(mainshock: MainShock) -> str:
     return f"{y}{m:02d}_M{mainshock.magnitude:.1f}_{mainshock.latitude:.2f}_{mainshock.longitude:.2f}"
 
 
-def _default_title_zh(mainshock: MainShock) -> str:
-    y = mainshock.time_utc.year
-    m = mainshock.time_utc.month
+def _title_date(mainshock: MainShock, tz: str) -> datetime:
+    return mainshock.time_utc + timedelta(hours=8) if tz in ("utc8", "cn", "both") else mainshock.time_utc
+
+
+def _default_title_zh(mainshock: MainShock, tz: str = "utc") -> str:
+    t = _title_date(mainshock, tz)
     place = (mainshock.place or "").split(",")[0].strip()[:24]
-    name = f"{place} " if place else ""
-    return f"{y}年{m}月 {name}M{mainshock.magnitude:.1f} 地震震中区历史地震活动分析"
+    name = f"{place} " if place and place.isascii() else place
+    return f"{t.year}年{t.month}月{t.day}日{name}M{mainshock.magnitude:.1f}地震 震中区历史地震活动分析"
+
+
+def _default_map_title_zh(mainshock: MainShock, tz: str = "utc") -> str:
+    t = _title_date(mainshock, tz)
+    place = (mainshock.place or "").split(",")[0].strip()[:24]
+    name = f"{place} " if place and place.isascii() else place
+    return f"{t.year}年{t.month}月{t.day}日{name}M{mainshock.magnitude:.1f}地震 震中区历史地震分布图"
 
 
 def _default_title_en(mainshock: MainShock) -> str:

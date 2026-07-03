@@ -6,7 +6,7 @@ import signal
 import shutil
 import subprocess
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
@@ -865,9 +865,10 @@ def build_report(
     if title_zh is None:
         place_short = (mainshock.place.split(",")[0].strip() if mainshock.place else "震中区")[:20]
         spacer = " " if place_short.isascii() else ""
+        title_time = mainshock.time_utc + timedelta(hours=8) if tz in ("utc8", "cn", "both") else mainshock.time_utc
         title_zh = (
-            f"{datetime.now().year}年{mainshock.time_utc.month}月"
-            f"{spacer}{place_short} M{mainshock.magnitude:.1f} 地震震中区历史地震活动分析"
+            f"{title_time.year}年{title_time.month}月{title_time.day}日"
+            f"{spacer}{place_short} M{mainshock.magnitude:.1f} 地震 震中区历史地震活动分析"
         )
     doc = Document()
 

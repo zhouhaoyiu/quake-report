@@ -44,6 +44,7 @@ CHINA_BOUNDARY_DIR = PROJECT_ROOT / "data/china_boundaries"
 TIANDITU_CHINA_GEOJSON = CHINA_BOUNDARY_DIR / "tianditu_china_level2.geojson"
 TIANDITU_CHINA_CITIES = CHINA_BOUNDARY_DIR / "tianditu_china_cities.json"
 CHINA_BBOX = (70.0, 140.0, 3.0, 56.0)
+MAP_OUTPUT_UNIT = "中国地震局工程力学研究所"
 
 # ----------------------------------------------------------------------------
 # 中文字体注册
@@ -170,13 +171,13 @@ def render_distribution_map(
     fig = plt.figure(figsize=(8.5, 7.0), constrained_layout=False)
     data_crs = ccrs.PlateCarree()
     map_crs = ccrs.AzimuthalEquidistant(central_longitude=lon0, central_latitude=lat0)
-    ax = fig.add_axes([0.08, 0.10, 0.88, 0.82], projection=map_crs)
+    ax = fig.add_axes([0.08, 0.12, 0.88, 0.74], projection=map_crs)
     ax.set_extent([min_lon, max_lon, min_lat, max_lat], crs=data_crs)
 
     # ---- 地理底图要素 ----
     # 海洋 / 陆地填色（淡）
-    ax.add_feature(cfeature.LAND.with_scale("50m"), facecolor="#f5f3ed", zorder=0)
-    ax.add_feature(cfeature.OCEAN.with_scale("50m"), facecolor="#e7f0f5", zorder=0)
+    ax.add_feature(cfeature.LAND.with_scale("50m"), facecolor="#f6d4a0", zorder=0)
+    ax.add_feature(cfeature.OCEAN.with_scale("50m"), facecolor="#abc7df", zorder=0)
     if _intersects_bbox((min_lon, max_lon, min_lat, max_lat), CHINA_BBOX):
         _draw_china_official_boundaries(ax, min_lon, max_lon, min_lat, max_lat, data_crs)
     else:
@@ -248,8 +249,10 @@ def render_distribution_map(
     # ---- 经纬度刻度 ----
     gl = ax.gridlines(draw_labels=True, linewidth=0.4, color="#aaa", alpha=0.6,
                       linestyle=":", x_inline=False, y_inline=False)
-    gl.top_labels = False
+    gl.top_labels = True
+    gl.bottom_labels = False
     gl.right_labels = False
+    gl.rotate_labels = False
     gl.xlabel_style = {"size": 9, "color": "#333"}
     gl.ylabel_style = {"size": 9, "color": "#333"}
 
@@ -265,12 +268,25 @@ def render_distribution_map(
 
     # ---- 图例（右下角） ----
     _draw_legend(ax, mainshock, map_view=map_view)
+    _draw_map_footer(fig, ax)
 
     # 保存
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     fig.savefig(output_path, dpi=dpi, facecolor="white", pil_kwargs={"compress_level": 2})
     plt.close(fig)
     return output_path
+
+
+def _draw_map_footer(fig, ax):
+    box = ax.get_position()
+    y = max(0.025, box.y0 - 0.035)
+    today = datetime.now().strftime("%Y年%m月%d日")
+    fig.text(box.x0, y, f"产出单位：{MAP_OUTPUT_UNIT}",
+             ha="left", va="center", fontsize=8.5, color="#333",
+             fontproperties=_map_font())
+    fig.text((box.x0 + box.x1) / 2, y, today,
+             ha="center", va="center", fontsize=8.5, color="#333",
+             fontproperties=_map_font())
 
 
 def _catalog_for_map_display(catalog: pd.DataFrame, min_mag: float | None = None) -> pd.DataFrame:
