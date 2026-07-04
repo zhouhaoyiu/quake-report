@@ -419,10 +419,12 @@ def _draw_china_official_boundaries(ax, min_lon, max_lon, min_lat, max_lat, proj
 def _china_boundary_style(code: str) -> tuple[str, float, float]:
     # ponytail: BOUL code prefixes are enough for map hierarchy; add a code table if labels are needed.
     if code.startswith("63"):
-        return "#222222", 1.15, 0.95
+        return "#242424", 1.25, 0.98
     if code.startswith("64"):
-        return "#4a4a4a", 0.8, 0.85
-    return "#777777", 0.45, 0.65
+        return "#2f2f2f", 1.05, 0.95
+    if code.startswith("65"):
+        return "#8a8175", 0.42, 0.58
+    return "#5f5a52", 0.55, 0.72
 
 
 def _draw_china_tianditu_geojson(ax, min_lon, max_lon, min_lat, max_lat, proj):
@@ -437,7 +439,7 @@ def _draw_china_tianditu_geojson(ax, min_lon, max_lon, min_lat, max_lat, proj):
             xs, ys = zip(*ring)
             if not _intersects_bbox((min(xs), max(xs), min(ys), max(ys)), target_bbox):
                 continue
-            ax.plot(xs, ys, color="#6a6a6a", linewidth=0.55,
+            ax.plot(xs, ys, color="#4f4a43", linewidth=0.75,
                     linestyle="-", transform=proj, zorder=1.4)
     _draw_tianditu_outer_boundary(ax, target_bbox, proj)
 
@@ -507,29 +509,26 @@ def _draw_china_city_labels(ax, min_lon, max_lon, min_lat, max_lat, lon0, lat0, 
 
 
 def _draw_tianditu_region_labels(ax, min_lon, max_lon, min_lat, max_lat, used_names: set[str], proj):
+    try:
+        from shapely.geometry import box, shape
+    except Exception:
+        return
     labels = []
-    target_bbox = (min_lon, max_lon, min_lat, max_lat)
+    viewport = box(min_lon, min_lat, max_lon, max_lat)
     for feature in _load_tianditu_china_geojson().get("features", []):
         props = feature.get("properties") or {}
         name = _short_region_name(str(props.get("name", "")))
         if not name or name in used_names:
             continue
-        rings = _geojson_rings(feature.get("geometry") or {})
-        points = [point for ring in rings for point in ring]
-        if not points:
+        geom = feature.get("geometry") or {}
+        try:
+            visible = shape(geom).intersection(viewport)
+        except Exception:
             continue
-        xs, ys = zip(*points)
-        bbox = (min(xs), max(xs), min(ys), max(ys))
-        if not _intersects_bbox(bbox, target_bbox):
+        if visible.is_empty or visible.area <= 0.02:
             continue
-        x0, x1 = max(bbox[0], min_lon), min(bbox[1], max_lon)
-        y0, y1 = max(bbox[2], min_lat), min(bbox[3], max_lat)
-        area = max(0.0, x1 - x0) * max(0.0, y1 - y0)
-        lon = float(props.get("lng") or (x0 + x1) / 2)
-        lat = float(props.get("lat") or (y0 + y1) / 2)
-        if not (min_lon <= lon <= max_lon and min_lat <= lat <= max_lat):
-            lon, lat = (x0 + x1) / 2, (y0 + y1) / 2
-        labels.append((area, lon, lat, name))
+        point = visible.representative_point()
+        labels.append((visible.area, float(point.x), float(point.y), name))
     labels.sort(reverse=True)
     for _, lon, lat, name in labels[:4]:
         _draw_region_label(ax, lon, lat, name, proj)
