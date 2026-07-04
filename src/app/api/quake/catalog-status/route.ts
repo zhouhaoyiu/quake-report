@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
+import { prewarmPythonWorker } from "@/lib/python-worker";
 
 const STATUS_PATHS = [
   process.env.QUAKE_USGS_CATALOG_STATUS,
@@ -8,6 +9,7 @@ const STATUS_PATHS = [
 ].filter(Boolean) as string[];
 
 export async function GET() {
+  prewarmPythonWorker();
   for (const file of STATUS_PATHS) {
     try {
       const status = JSON.parse(await fs.readFile(file, "utf-8"));

@@ -45,7 +45,7 @@ def search(db: Path, spec: dict) -> dict:
         conn.row_factory = sqlite3.Row
         event_id = (spec.get("eventId") or "").strip()
         if event_id:
-            row = conn.execute(f"select {COLUMNS} from events where lower(id)=lower(?) limit 1", (event_id,)).fetchone()
+            row = conn.execute(f"select {COLUMNS} from events where id = ? collate nocase limit 1", (event_id,)).fetchone()
             return payload([row_to_event(row)] if row else [], 1 if row else 0, page, page_size, "本地目录 Event ID 命中")
 
         if spec.get("countOnly"):
@@ -86,6 +86,8 @@ def select_rows(conn: sqlite3.Connection, spec: dict, page: int, page_size: int)
         return [row for row, _ in filtered[offset:offset + page_size]], len(filtered)
 
     total = conn.execute(f"select count(*) {from_sql} where {' and '.join(where)}", params).fetchone()[0]
+    if from_sql == "from events":
+        from_sql = "from events indexed by idx_events_time_mag"
     rows = conn.execute(
         f"select {COLUMNS} {from_sql} where {' and '.join(where)} order by time desc limit ? offset ?",
         [*params, page_size, offset],

@@ -45,6 +45,7 @@ import fsSync from "fs";
 import fs from "fs/promises";
 import { putReportFile } from "@/lib/report-file-store";
 import { resolvePythonBinary } from "@/lib/python-runtime";
+import { runPythonWorker, stopPythonWorker, workerBusy, workerEnabled } from "@/lib/python-worker";
 
 const PROJECT_ROOT = process.cwd();
 const CLI_SCRIPT = path.join(PROJECT_ROOT, "scripts", "quake_report", "cli.py");
@@ -310,6 +311,7 @@ function streamPython(script: string, args: string[], jsonPath: string, outputDi
   let pending = "";
   const jobId = randomUUID();
   let proc: ReturnType<typeof spawn> | null = null;
+  let usingWorker = false;
   let finished = false;
 
   const stream = new ReadableStream({
@@ -391,32 +393,7 @@ function streamPython(script: string, args: string[], jsonPath: string, outputDi
         }
       };
 
-      try {
-        const python = resolvePythonBinary();
-        const child = spawn(python, [script, ...args], {
-          env: { ...process.env, PYTHONUNBUFFERED: "1" },
-        });
-        proc = child;
-
-        child.stdout.on("data", (d) => {
-          const text = d.toString();
-          stdout += text;
-          pending += text;
-          const lines = pending.split(/\r?\n/);
-          pending = lines.pop() || "";
-          for (const line of lines) onLine(line);
-        });
-        child.stderr.on("data", (d) => {
-          stderr += d.toString();
-        });
-        child.on("error", async (e) => {
-          stderr += `${e?.message || String(e)}\n`;
-          await finish({
-            type: "done",
-            result: { ok: false, error: formatCliError({ stdout, stderr }) },
-          });
-        });
-        child.on("close", async (code) => {
+      const closeJob = async (code: number | null) => {
           if (finished) return;
           if (pending) onLine(pending);
           if (code !== 0) {
@@ -446,7 +423,49 @@ function streamPython(script: string, args: string[], jsonPath: string, outputDi
               result: { ok: false, error: "生成失败：未获取到报告摘要" },
             });
           }
+      };
+
+      try {
+        if (workerEnabled() && !workerBusy()) {
+          usingWorker = true;
+          runPythonWorker(args, {
+            onStdoutLine: onLine,
+            onStderrLine: (line) => {
+              stderr += `${line}\n`;
+            },
+          }).then(async (result) => {
+            stdout = result.stdout;
+            stderr = result.stderr;
+            await closeJob(result.code);
+          });
+          return;
+        }
+
+        const python = resolvePythonBinary();
+        const child = spawn(python, [script, ...args], {
+          env: { ...process.env, PYTHONUNBUFFERED: "1", MPLCONFIGDIR: process.env.MPLCONFIGDIR || path.join(os.tmpdir(), "quake-report-mpl") },
         });
+        proc = child;
+
+        child.stdout.on("data", (d) => {
+          const text = d.toString();
+          stdout += text;
+          pending += text;
+          const lines = pending.split(/\r?\n/);
+          pending = lines.pop() || "";
+          for (const line of lines) onLine(line);
+        });
+        child.stderr.on("data", (d) => {
+          stderr += d.toString();
+        });
+        child.on("error", async (e) => {
+          stderr += `${e?.message || String(e)}\n`;
+          await finish({
+            type: "done",
+            result: { ok: false, error: formatCliError({ stdout, stderr }) },
+          });
+        });
+        child.on("close", closeJob);
       } catch (e: any) {
         void finish({ type: "done", result: { ok: false, error: e?.message || String(e) } });
       }
@@ -454,6 +473,7 @@ function streamPython(script: string, args: string[], jsonPath: string, outputDi
     cancel() {
       finished = true;
       proc?.kill("SIGTERM");
+      if (usingWorker) stopPythonWorker();
       void cleanupOutput(outputDir);
     },
   });
@@ -492,10 +512,11 @@ function runPython(script: string, args: string[]): Promise<{
   stdout: string;
   stderr: string;
 }> {
+  if (workerEnabled() && !workerBusy()) return runPythonWorker(args);
   return new Promise((resolve) => {
     const python = resolvePythonBinary();
     const proc = spawn(python, [script, ...args], {
-      env: { ...process.env, PYTHONUNBUFFERED: "1" },
+      env: { ...process.env, PYTHONUNBUFFERED: "1", MPLCONFIGDIR: process.env.MPLCONFIGDIR || path.join(os.tmpdir(), "quake-report-mpl") },
     });
     let settled = false;
     let stdout = "";

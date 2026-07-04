@@ -123,6 +123,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     conn.execute(f"create table if not exists events ({', '.join(cols)})")
     conn.execute("create table if not exists meta (key text primary key, value text not null)")
     conn.execute("create index if not exists idx_events_time on events(time)")
+    conn.execute("create index if not exists idx_events_id_nocase on events(id collate nocase)")
     conn.execute("create index if not exists idx_events_mag on events(mag)")
     conn.execute("create index if not exists idx_events_lat_lon on events(latitude, longitude)")
     conn.execute("create index if not exists idx_events_mag_time on events(mag, time)")
