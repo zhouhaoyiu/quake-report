@@ -45,7 +45,7 @@ import fsSync from "fs";
 import fs from "fs/promises";
 import { putReportFile } from "@/lib/report-file-store";
 import { resolvePythonBinary } from "@/lib/python-runtime";
-import { runPythonWorker, stopPythonWorker, workerBusy, workerEnabled } from "@/lib/python-worker";
+import { runPythonWorker, stopPythonWorker, workerEnabled } from "@/lib/python-worker";
 
 const PROJECT_ROOT = process.cwd();
 const CLI_SCRIPT = path.join(PROJECT_ROOT, "scripts", "quake_report", "cli.py");
@@ -426,7 +426,7 @@ function streamPython(script: string, args: string[], jsonPath: string, outputDi
       };
 
       try {
-        if (workerEnabled() && !workerBusy()) {
+        if (workerEnabled()) {
           usingWorker = true;
           runPythonWorker(args, {
             onStdoutLine: onLine,
@@ -512,7 +512,7 @@ function runPython(script: string, args: string[]): Promise<{
   stdout: string;
   stderr: string;
 }> {
-  if (workerEnabled() && !workerBusy()) return runPythonWorker(args);
+  if (workerEnabled()) return runPythonWorker(args);
   return new Promise((resolve) => {
     const python = resolvePythonBinary();
     const proc = spawn(python, [script, ...args], {
