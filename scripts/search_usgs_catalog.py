@@ -43,6 +43,8 @@ def search(db: Path, spec: dict) -> dict:
 
     with sqlite3.connect(db) as conn:
         conn.row_factory = sqlite3.Row
+        if spec.get("latestDays"):
+            return latest_payload(conn, spec, page_size)
         event_id = (spec.get("eventId") or "").strip()
         if event_id:
             row = conn.execute(f"select {COLUMNS} from events where id = ? collate nocase limit 1", (event_id,)).fetchone()
@@ -62,6 +64,25 @@ def search(db: Path, spec: dict) -> dict:
         if spec.get("lat") is not None and spec.get("lon") is not None:
             note += "，半径搜索先按经纬度包围盒过滤"
         return payload([row_to_event(row) for row in rows], total, page, page_size, note)
+
+
+def latest_payload(conn: sqlite3.Connection, spec: dict, limit: int) -> dict:
+    latest = conn.execute("select max(time) from events").fetchone()[0]
+    if not latest:
+        return {**payload([], 0, 1, limit, "离线目录为空"), "catalogEnd": None}
+    end = parse_utc_dt(latest)
+    days = max(1, int(spec.get("latestDays") or 30))
+    start = end - dt.timedelta(days=days)
+    min_mag = float(spec.get("minMag") or 3)
+    rows = conn.execute(
+        f"select {COLUMNS} from events where time >= ? and time <= ? and mag >= ? "
+        "order by time desc limit ?",
+        (start.isoformat().replace("+00:00", "Z"), latest, min_mag, limit),
+    ).fetchall()
+    return {
+        **payload([row_to_event(row) for row in rows], len(rows), 1, limit, "离线目录中的最近事件"),
+        "catalogEnd": latest,
+    }
 
 
 def select_rows(conn: sqlite3.Connection, spec: dict, page: int, page_size: int) -> tuple[list[sqlite3.Row], int]:

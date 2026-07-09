@@ -31,6 +31,7 @@ import pandas as pd
 from matplotlib.lines import Line2D
 from matplotlib.patches import FancyBboxPatch
 
+import cartopy
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from cartopy.io import shapereader
@@ -40,6 +41,9 @@ from .usgs_client import MainShock, CatalogQuery
 from .fault_loader import load_faults_in_bbox
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+LOCAL_CARTOPY_DATA = PROJECT_ROOT / "data/cartopy"
+if LOCAL_CARTOPY_DATA.exists():
+    cartopy.config["pre_existing_data_dir"] = LOCAL_CARTOPY_DATA
 CHINA_BOUNDARY_DIR = PROJECT_ROOT / "data/china_boundaries"
 TIANDITU_CHINA_GEOJSON = CHINA_BOUNDARY_DIR / "tianditu_china_level2.geojson"
 TIANDITU_CHINA_CITIES = CHINA_BOUNDARY_DIR / "tianditu_china_cities.json"

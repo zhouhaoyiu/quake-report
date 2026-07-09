@@ -33,6 +33,9 @@ export async function POST(req: NextRequest) {
         lat = localEvent.latitude;
         time = localEvent.time;
       } else {
+        if (process.env.QUAKE_OFFLINE === "1") {
+          return NextResponse.json({ ok: false, error: "离线目录中没有这个 Event ID" }, { status: 404 });
+        }
         const detail = await cachedFetchJson(`${DETAIL_BASE}/${eventId}.geojson`, 3600_000);
         if (detail.status >= 400) {
           return NextResponse.json({ ok: false, error: "USGS eventid 查询失败" }, { status: 502 });
@@ -67,6 +70,10 @@ export async function POST(req: NextRequest) {
       };
       setCountCache(requestKey, payload);
       return NextResponse.json(payload);
+    }
+
+    if (process.env.QUAKE_OFFLINE === "1") {
+      return NextResponse.json({ ok: false, error: "离线目录库不可用" }, { status: 503 });
     }
 
     const params = new URLSearchParams({

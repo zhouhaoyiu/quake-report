@@ -35,6 +35,8 @@ async function proxyToAliyun(request) {
     "Connection: close",
     `Accept: ${request.headers.get("accept") || "*/*"}`,
     `User-Agent: ${request.headers.get("user-agent") || "quake-report-api-stream"}`,
+    `CF-Connecting-IP: ${request.headers.get("cf-connecting-ip") || ""}`,
+    `X-Forwarded-For: ${request.headers.get("cf-connecting-ip") || ""}`,
     `X-Forwarded-Host: ${incoming.host}`,
     "X-Forwarded-Proto: https",
   ];

@@ -49,3 +49,7 @@ prompt
 
 server.log
 var/
+__pycache__/
+*.py[cod]
+/release/*
+!/release/deployment-guide-zh.md

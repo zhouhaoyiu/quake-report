@@ -145,11 +145,14 @@ def summarize_faults(mainshock: MainShock, query: CatalogQuery) -> tuple[int, st
 
 def collect_supplemental_data(mainshock: MainShock, query: CatalogQuery) -> SupplementalData:
     data = SupplementalData()
-    try:
-        data.emsc_catalog = fetch_emsc_catalog(query)
-        data.emsc_limited = len(data.emsc_catalog) >= 2000
-    except Exception as exc:
-        data.emsc_error = _public_emsc_error(exc)
+    if os.environ.get("QUAKE_OFFLINE") == "1":
+        data.emsc_error = "离线模式未查询"
+    else:
+        try:
+            data.emsc_catalog = fetch_emsc_catalog(query)
+            data.emsc_limited = len(data.emsc_catalog) >= 2000
+        except Exception as exc:
+            data.emsc_error = _public_emsc_error(exc)
     data.fault_count, data.nearest_fault_name, data.nearest_fault_distance_km = summarize_faults(
         mainshock, query
     )

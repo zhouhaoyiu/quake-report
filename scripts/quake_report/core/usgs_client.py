@@ -34,6 +34,10 @@ _CACHE_TTL_SEC = int(os.environ.get("QUAKE_USGS_CACHE_TTL", "86400"))
 _CATALOG_DB_ENV = "QUAKE_USGS_CATALOG_DB"
 
 
+def _offline_mode() -> bool:
+    return os.environ.get("QUAKE_OFFLINE") == "1"
+
+
 def normalize_mag_type(value: str | None) -> str:
     mag_type = str(value or "Mw").strip()
     if mag_type.upper().startswith("MW"):
@@ -51,6 +55,9 @@ def _get_text(url: str, *, params: dict | None = None, timeout: int = 30, cache_
                 return 200, path.read_text(encoding="utf-8")
         except OSError:
             pass
+
+    if _offline_mode():
+        raise RuntimeError("离线模式不会访问外部地震服务")
 
     r = requests.get(url, params=params, timeout=timeout)
     text = r.text
@@ -163,6 +170,11 @@ def _parse_usgs_time(t) -> datetime:
 
 def fetch_mainshock_by_id(event_id: str, timeout: int = 30) -> MainShock:
     """按 USGS eventid 拉取主震详情。event_id 形如 'us7000xxxx'。"""
+    local = _fetch_mainshock_by_id_from_db(event_id)
+    if local is not None:
+        return local
+    if _offline_mode():
+        raise RuntimeError(f"离线目录中没有 Event ID：{event_id}")
     url = f"{GEOJSON_DETAIL_BASE}/{event_id}.geojson"
     status, text = _get_text(url, timeout=timeout)
     if status >= 400:
@@ -183,6 +195,33 @@ def fetch_mainshock_by_id(event_id: str, timeout: int = 30) -> MainShock:
     )
 
 
+def _fetch_mainshock_by_id_from_db(event_id: str) -> Optional[MainShock]:
+    path = _catalog_db_path()
+    if path is None:
+        return None
+    try:
+        with sqlite3.connect(path) as conn:
+            row = conn.execute(
+                "select id, latitude, longitude, depth, mag, magType, time, place "
+                "from events where id = ? collate nocase limit 1",
+                (event_id,),
+            ).fetchone()
+    except sqlite3.Error:
+        return None
+    if not row:
+        return None
+    return MainShock(
+        event_id=row[0],
+        latitude=float(row[1]),
+        longitude=float(row[2]),
+        depth_km=float(row[3] or 0),
+        magnitude=float(row[4]),
+        mag_type=normalize_mag_type(row[5]),
+        time_utc=_parse_usgs_time(row[6]),
+        place=row[7] or "",
+    )
+
+
 def fetch_recent_large_events(
     days: int = 30,
     min_magnitude: float = 6.0,
@@ -193,6 +232,9 @@ def fetch_recent_large_events(
 
     用于"拉取 USGS 最新大震"模式 —— 让用户从列表中选一个事件。
     """
+    if _offline_mode():
+        return _fetch_recent_large_events_from_db(days, min_magnitude, limit)
+
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=days)
     url = f"{FDSN_BASE}/query"
@@ -209,6 +251,27 @@ def fetch_recent_large_events(
     df = pd.read_csv(io.StringIO(text))
     if len(df) > limit:
         df = df.head(limit)
+    return df
+
+
+def _fetch_recent_large_events_from_db(days: int, min_magnitude: float, limit: int) -> pd.DataFrame:
+    path = _catalog_db_path()
+    if path is None:
+        raise RuntimeError("离线目录库不可用")
+    with sqlite3.connect(path) as conn:
+        latest = conn.execute("select max(time) from events").fetchone()[0]
+        if not latest:
+            return pd.DataFrame()
+        end = _parse_usgs_time(latest)
+        start = end - timedelta(days=days)
+        df = pd.read_sql_query(
+            "select time, latitude, longitude, depth, mag, magType, id, place "
+            "from events where time >= ? and time <= ? and mag >= ? "
+            "order by time desc limit ?",
+            conn,
+            params=[_format_usgs_datetime(start), _format_usgs_datetime(end), min_magnitude, limit],
+        )
+    df.attrs["catalog_end"] = latest
     return df
 
 
@@ -367,21 +430,30 @@ def _fetch_historical_catalog_from_db(query: CatalogQuery, exclude_event_id: Opt
     ]
     sql = """
         select time, latitude, longitude, depth, mag, magType, id, place
-        from events
+        from events indexed by idx_events_lat_lon_mag_time
         where time >= ? and time <= ?
           and mag >= ?
           and latitude between ? and ?
           and {lon_clause}
         order by time asc
     """.format(lon_clause=lon_clause)
+    coverage_end = None
+    catalog_stale = False
     try:
         with sqlite3.connect(path) as conn:
+            coverage_end = _catalog_coverage_end(conn)
+            query_end = _naive_utc(query.end_time or datetime.now(timezone.utc))
+            catalog_stale = coverage_end is not None and coverage_end < query_end
+            if catalog_stale and not _offline_mode():
+                return None
             df = pd.read_sql_query(sql, conn, params=params)
     except sqlite3.Error:
         return None
 
     if df.empty:
-        return _empty_catalog()
+        result = _empty_catalog()
+        _set_catalog_coverage_attrs(result, catalog_stale, coverage_end)
+        return result
 
     df["dist_km"] = haversine_km(
         query.latitude, query.longitude, df["latitude"].values, df["longitude"].values
@@ -396,7 +468,29 @@ def _fetch_historical_catalog_from_db(query: CatalogQuery, exclude_event_id: Opt
     result.attrs["source"] = "local_usgs_catalog"
     result.attrs["usgs_query_limit"] = len(result)
     result.attrs["usgs_limit_hit"] = False
+    _set_catalog_coverage_attrs(result, catalog_stale, coverage_end)
     return result
+
+
+def _catalog_coverage_end(conn: sqlite3.Connection) -> Optional[datetime]:
+    row = conn.execute("select value from meta where key='last_sync_utc'").fetchone()
+    value = row[0] if row else None
+    if not value:
+        row = conn.execute("select max(time) from events").fetchone()
+        value = row[0] if row else None
+    return _naive_utc(_parse_usgs_time(value)) if value else None
+
+
+def _naive_utc(value: datetime) -> datetime:
+    if value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
+def _set_catalog_coverage_attrs(df: pd.DataFrame, stale: bool, coverage_end: Optional[datetime]) -> None:
+    df.attrs["catalog_stale"] = stale
+    if coverage_end is not None:
+        df.attrs["catalog_coverage_end"] = coverage_end.isoformat(timespec="seconds") + "Z"
 
 
 def exclude_mainshock_like(

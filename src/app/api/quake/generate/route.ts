@@ -45,16 +45,10 @@ import fsSync from "fs";
 import fs from "fs/promises";
 import { putReportFile } from "@/lib/report-file-store";
 import { resolvePythonBinary } from "@/lib/python-runtime";
-import { runPythonWorker, stopPythonWorker, workerEnabled } from "@/lib/python-worker";
+import { cancelPythonWorkerJob, runPythonWorker, workerEnabled } from "@/lib/python-worker";
 
 const PROJECT_ROOT = process.cwd();
 const CLI_SCRIPT = path.join(PROJECT_ROOT, "scripts", "quake_report", "cli.py");
-const REPORT_OUTPUT_SOURCES = [
-  CLI_SCRIPT,
-  path.join(PROJECT_ROOT, "scripts", "quake_report", "core", "docx_builder.py"),
-  path.join(PROJECT_ROOT, "scripts", "quake_report", "core", "map_renderer.py"),
-  path.join(PROJECT_ROOT, "scripts", "quake_report", "core", "narrative_builder.py"),
-];
 const MIME: Record<string, string> = {
   ".png": "image/png",
   ".csv": "text/csv; charset=utf-8",
@@ -64,9 +58,18 @@ const MIME: Record<string, string> = {
 const GENERATION_CACHE_TTL_MS = 10 * 60_000;
 const generationCache: Map<string, { expires: number; result: any }> =
   ((globalThis as any).__quakeGenerationCache ||= new Map());
+const generateRequests: Map<string, number[]> =
+  ((globalThis as any).__quakeGenerateRequests ||= new Map());
 
 export async function POST(req: NextRequest) {
   try {
+    const retryAfter = rateLimitRetryAfter(req);
+    if (retryAfter > 0) {
+      return NextResponse.json(
+        { ok: false, error: "生成请求过于频繁，请稍后重试" },
+        { status: 429, headers: { "Retry-After": String(retryAfter) } },
+      );
+    }
     const body = await req.json();
     const {
       mode = "manual",
@@ -81,7 +84,7 @@ export async function POST(req: NextRequest) {
     const cacheKey = generationCacheKey({
       mode, lat, lon, mag, time, depth, place, magType, sourceText, eventId,
       radiusKm, startTime, endTime, minMag, figNum, slug, titleZh, titleEn,
-      noPdf, reportLevel, tz, mapView, outputVersion: reportOutputVersion(),
+      noPdf, reportLevel, tz, mapView,
     });
     const cached = getGenerationCache(cacheKey);
     if (cached) {
@@ -203,12 +206,6 @@ export async function POST(req: NextRequest) {
 
 function generationCacheKey(value: any) {
   return createHash("sha1").update(JSON.stringify(value)).digest("hex");
-}
-
-function reportOutputVersion() {
-  return REPORT_OUTPUT_SOURCES
-    .map((file) => `${path.basename(file)}:${fsSync.statSync(file).mtimeMs}`)
-    .join("|");
 }
 
 function normalizeReportLevel(value: any) {
@@ -345,14 +342,6 @@ function streamPython(script: string, args: string[], jsonPath: string, outputDi
           // Already closed.
         }
       };
-      send({
-        type: "job",
-        jobId,
-        progress: 5,
-        message: "任务开始执行",
-        waitSec: 0,
-      });
-
       const onLine = (line: string) => {
         if (line.startsWith("MAP_READY:")) {
           const mapPath = line.slice("MAP_READY:".length).trim();
@@ -429,11 +418,31 @@ function streamPython(script: string, args: string[], jsonPath: string, outputDi
         if (workerEnabled()) {
           usingWorker = true;
           runPythonWorker(args, {
+            onQueued: (queuePosition) => {
+              send({
+                type: "job",
+                jobId,
+                progress: queuePosition > 1 ? 2 : 5,
+                message: queuePosition > 1 ? "任务已进入生成队列" : "任务开始执行",
+                queuePosition,
+                waitSec: 0,
+              });
+            },
+            onStart: () => {
+              lastStageAt = Date.now();
+              send({
+                type: "progress",
+                progress: 5,
+                message: "任务开始执行",
+                queuePosition: 1,
+                waitSec: (Date.now() - startedAt) / 1000,
+              });
+            },
             onStdoutLine: onLine,
             onStderrLine: (line) => {
               stderr += `${line}\n`;
             },
-          }).then(async (result) => {
+          }, jobId).then(async (result) => {
             stdout = result.stdout;
             stderr = result.stderr;
             await closeJob(result.code);
@@ -441,6 +450,7 @@ function streamPython(script: string, args: string[], jsonPath: string, outputDi
           return;
         }
 
+        send({ type: "job", jobId, progress: 5, message: "任务开始执行", waitSec: 0 });
         const python = resolvePythonBinary();
         const child = spawn(python, [script, ...args], {
           env: { ...process.env, PYTHONUNBUFFERED: "1", MPLCONFIGDIR: process.env.MPLCONFIGDIR || path.join(os.tmpdir(), "quake-report-mpl") },
@@ -473,7 +483,7 @@ function streamPython(script: string, args: string[], jsonPath: string, outputDi
     cancel() {
       finished = true;
       proc?.kill("SIGTERM");
-      if (usingWorker) stopPythonWorker();
+      if (usingWorker) cancelPythonWorkerJob(jobId);
       void cleanupOutput(outputDir);
     },
   });
@@ -485,6 +495,23 @@ function streamPython(script: string, args: string[], jsonPath: string, outputDi
       "X-Accel-Buffering": "no",
     },
   });
+}
+
+function rateLimitRetryAfter(req: NextRequest) {
+  const limit = Number(process.env.QUAKE_RATE_LIMIT_PER_MINUTE || 0);
+  if (!Number.isFinite(limit) || limit <= 0) return 0;
+  const now = Date.now();
+  const key = req.headers.get("cf-connecting-ip")
+    || req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+    || "unknown";
+  const recent = (generateRequests.get(key) || []).filter((time) => now - time < 60_000);
+  if (recent.length >= limit) {
+    generateRequests.set(key, recent);
+    return Math.max(1, Math.ceil((60_000 - (now - recent[0])) / 1000));
+  }
+  recent.push(now);
+  generateRequests.set(key, recent);
+  return 0;
 }
 
 function formatCliError(result: { stdout: string; stderr: string }) {

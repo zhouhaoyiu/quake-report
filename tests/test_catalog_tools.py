@@ -2,10 +2,12 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+import os
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -22,6 +24,7 @@ from quake_report.core.formatting import format_km
 from quake_report.core.mainshock_helpers import apply_place_override
 from quake_report.core.narrative_builder import build_narrative_zh
 from quake_report.core.usgs_client import CatalogQuery, CatalogStats
+from quake_report.core import usgs_client
 
 
 class CatalogToolTests(unittest.TestCase):
@@ -71,6 +74,48 @@ class CatalogToolTests(unittest.TestCase):
         result = search_usgs_catalog.search(self.db, {"eventId": "US1"})
         self.assertEqual(result["total"], 1)
         self.assertEqual(result["events"][0]["eventId"], "us1")
+
+    def test_offline_event_id_uses_local_catalog(self):
+        with patch.dict(os.environ, {
+            "QUAKE_OFFLINE": "1",
+            "QUAKE_USGS_CATALOG_DB": str(self.db),
+        }):
+            event = usgs_client.fetch_mainshock_by_id("US1")
+        self.assertEqual(event.event_id, "us1")
+        self.assertEqual(event.place, "Sichuan, China")
+
+    def test_catalog_coverage_controls_offline_fallback(self):
+        query = CatalogQuery(
+            31.0,
+            103.4,
+            max_radius_km=50,
+            start_time=datetime(1900, 1, 1),
+            end_time=datetime(2020, 1, 1),
+            min_magnitude=3,
+        )
+        with patch.dict(os.environ, {
+            "QUAKE_OFFLINE": "1",
+            "QUAKE_USGS_CATALOG_DB": str(self.db),
+        }):
+            offline = usgs_client._fetch_historical_catalog_from_db(query)
+        self.assertTrue(offline.attrs["catalog_stale"])
+        self.assertEqual(len(offline), 2)
+
+        with patch.dict(os.environ, {
+            "QUAKE_OFFLINE": "0",
+            "QUAKE_USGS_CATALOG_DB": str(self.db),
+        }):
+            online = usgs_client._fetch_historical_catalog_from_db(query)
+        self.assertIsNone(online)
+
+    def test_offline_recent_uses_latest_catalog_window(self):
+        result = search_usgs_catalog.search(self.db, {
+            "latestDays": 2,
+            "minMag": 3,
+            "pageSize": 10,
+        })
+        self.assertEqual(result["catalogEnd"], "2008-05-12T07:30:00.000Z")
+        self.assertEqual(result["total"], 3)
 
     def test_text_search_uses_catalog_index(self):
         result = search_usgs_catalog.search(self.db, {

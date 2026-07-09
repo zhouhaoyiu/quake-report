@@ -15,7 +15,7 @@
 - **报告结构**：封面 → 目录 → 一、主震概要 → 二、历史地震统计（模板 A/B 文字）→ 三、震中分布图 → 四、震级档位统计表 → 五、数据来源与方法说明
 - **自动模板选择**：当 N7=N8=0 时自动切换为模板 B（自 1950 年以来）
 - **最近事件 4 档分级**：M≥8 / 7-8 / 6-7 / 5-6，缺失档位自动跳过
-- **PDF 同步生成**：docx 生成后用 LibreOffice 转 PDF
+- **PDF 按需生成**：Word 完成后，点击 PDF 按钮再调用 LibreOffice 转换
 - **Web UI**：Next.js 单页应用，三种模式切换，实时显示生成进度与结果预览
 
 ## 文件结构
@@ -103,7 +103,7 @@ python3 scripts/quake_report.py --mode batch --csv events.csv
 
 ## 输出说明
 
-每次生成会产出 3 个文件（除 `--no-pdf` 外）：
+Web 端先产出地图、目录 CSV 和 Word；PDF 在用户点击下载时生成。CLI 默认仍可同时生成 PDF。
 
 | 文件 | 路径 |
 |---|---|
@@ -126,6 +126,7 @@ python3 scripts/quake_report.py --mode batch --csv events.csv
 - **历史地震目录**：USGS FDSN Web Service https://earthquake.usgs.gov/fdsnws/event/1/
 - **活动断层**：GEM Global Active Faults Database https://github.com/GEMScienceTools/gem-global-active-faults
 - **海岸线/国界**：Natural Earth（通过 cartopy 调用）
+- **中国区域边界**：全国地理信息资源目录服务系统 1:100万 BOUL 数据
 
 ## 技术栈
 

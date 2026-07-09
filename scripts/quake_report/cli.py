@@ -106,6 +106,10 @@ def generate_one(
     print(f"\n[1/5] 查询 USGS 历史目录（半径 {format_km(radius_km)} km，M≥{min_magnitude}）...")
     catalog = fetch_historical_catalog(query, exclude_event_id=mainshock.event_id)
     catalog, removed_mainshock = exclude_mainshock_like(catalog, mainshock)
+    warnings = []
+    if catalog.attrs.get("catalog_stale"):
+        coverage = catalog.attrs.get("catalog_coverage_end", "未知时间")
+        warnings.append(f"离线 USGS 目录截至 {coverage}，该时刻之后的事件未纳入统计。")
     print(f"  → 命中 {len(catalog)} 条事件")
     if removed_mainshock:
         print(f"  → 已从历史目录中剔除疑似主震记录 {removed_mainshock} 条")
@@ -116,7 +120,6 @@ def generate_one(
           f"N6={stats.n6} N7={stats.n7} N8={stats.n8}")
     if stats.mc_estimate is not None:
         print(f"  → 目录完整性震级 Mc≈{stats.mc_estimate:.1f}（{stats.mc_method}）")
-    warnings = []
     if stats.query_limit_hit:
         warnings.append(
             f"USGS 返回记录达到 {stats.query_limit} 条查询上限，统计可能低于真实目录量；建议提高最小震级或缩小半径后复核。"
@@ -144,20 +147,24 @@ def generate_one(
     print(f"MAP_READY:{map_path}")
 
     # 5) 辅助数据层
-    print("\n[3/5] 拉取辅助数据层（EMSC 目录 + GEM 断层摘要）...")
-    supplemental = collect_supplemental_data(mainshock, query)
-    if supplemental.emsc_error:
-        print(f"  → EMSC 辅助目录不可用：{supplemental.emsc_error}")
+    supplemental = None
+    if report_level == "simple":
+        print("\n[3/5] 简报模式无需辅助目录，跳过 EMSC 查询。")
     else:
-        suffix = "（达到查询上限，可能未完整）" if supplemental.emsc_limited else ""
-        print(f"  → EMSC 辅助目录返回 {len(supplemental.emsc_catalog)} 条事件{suffix}")
-    if supplemental.nearest_fault_distance_km is None:
-        print(f"  → GEM 断层：半径附近加载 {supplemental.fault_count} 条，未计算到最近距离")
-    else:
-        print(
-            f"  → GEM 断层：半径附近加载 {supplemental.fault_count} 条，"
-            f"最近约 {supplemental.nearest_fault_distance_km:.1f} km"
-        )
+        print("\n[3/5] 拉取辅助数据层（EMSC 目录 + GEM 断层摘要）...")
+        supplemental = collect_supplemental_data(mainshock, query)
+        if supplemental.emsc_error:
+            print(f"  → EMSC 辅助目录不可用：{supplemental.emsc_error}")
+        else:
+            suffix = "（达到查询上限，可能未完整）" if supplemental.emsc_limited else ""
+            print(f"  → EMSC 辅助目录返回 {len(supplemental.emsc_catalog)} 条事件{suffix}")
+        if supplemental.nearest_fault_distance_km is None:
+            print(f"  → GEM 断层：半径附近加载 {supplemental.fault_count} 条，未计算到最近距离")
+        else:
+            print(
+                f"  → GEM 断层：半径附近加载 {supplemental.fault_count} 条，"
+                f"最近约 {supplemental.nearest_fault_distance_km:.1f} km"
+            )
 
     # 6) 生成 docx
     docx_path = os.path.join(output_dir, f"{slug}.docx")

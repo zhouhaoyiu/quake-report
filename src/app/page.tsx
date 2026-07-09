@@ -249,6 +249,7 @@ export default function Home() {
   const [loadingMessage, setLoadingMessage] = useState("正在从 USGS 拉取地震目录...");
   const controlsLocked = loading;
   const controlsLockedRef = useRef(false);
+  const generationStartedAtRef = useRef(0);
   const [catalogCount, setCatalogCount] = useState<number | null>(null);
   const [progress, setProgress] = useState(0);
   const [elapsedSec, setElapsedSec] = useState(0);
@@ -262,6 +263,14 @@ export default function Home() {
   useEffect(() => {
     controlsLockedRef.current = controlsLocked;
   }, [controlsLocked]);
+
+  useEffect(() => {
+    if (!loading) return;
+    const timer = window.setInterval(() => {
+      setElapsedSec((Date.now() - generationStartedAtRef.current) / 1000);
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [loading]);
   const [darkMode, setDarkMode] = useState(DEFAULT_SETTINGS.darkMode);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsReady, setSettingsReady] = useState(false);
@@ -734,7 +743,9 @@ export default function Home() {
           chooseRecentEvent(latest);
           toast({
             title: `找到 ${j.events.length} 个事件`,
-            description: `近 ${recentDays} 天 M≥${recentMinMag}；已自动选取最新事件：M${latest.mag} ${latest.place}${j.cacheHit ? "（缓存）" : ""}`,
+            description: j.offline
+              ? `${j.note || "离线目录"}；已自动选取 M${latest.mag} ${latest.place}`
+              : `近 ${recentDays} 天 M≥${recentMinMag}；已自动选取最新事件：M${latest.mag} ${latest.place}${j.cacheHit ? "（缓存）" : ""}`,
           });
         }
       } else {
@@ -763,6 +774,7 @@ export default function Home() {
     }
     const body = buildRequestBody();
     if (!body) return;
+    generationStartedAtRef.current = Date.now();
     controlsLockedRef.current = true;
     setLoading(true);
     setResult(null);

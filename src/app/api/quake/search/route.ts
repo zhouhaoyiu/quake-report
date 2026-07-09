@@ -33,6 +33,10 @@ export async function GET(req: NextRequest) {
     const local = await searchLocalCatalog(spec, page);
     if (local) return cachedJson(cacheKey, local);
 
+    if (process.env.QUAKE_OFFLINE === "1") {
+      return NextResponse.json({ ok: false, error: "离线目录库不可用" }, { status: 503 });
+    }
+
     const idEvent = eventId ? await findByEventId(eventId) : null;
     if (idEvent) return cachedJson(cacheKey, { ok: true, events: page === 1 ? [idEvent] : [], page, pageSize: PAGE_SIZE, total: 1 });
 

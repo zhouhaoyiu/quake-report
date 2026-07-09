@@ -1195,7 +1195,8 @@ def convert_docx_to_pdf(docx_path: str, output_dir: str = None, timeout: int = 1
     if output_dir is None:
         output_dir = os.path.dirname(os.path.abspath(docx_path))
     office = (
-        shutil.which("libreoffice")
+        os.environ.get("LIBREOFFICE_BIN")
+        or shutil.which("libreoffice")
         or shutil.which("soffice")
         or "/Applications/LibreOffice.app/Contents/MacOS/soffice"
     )

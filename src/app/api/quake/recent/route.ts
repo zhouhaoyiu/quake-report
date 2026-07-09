@@ -10,8 +10,14 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { cachedFetchText } from "@/lib/usgs-cache";
+import { execFile } from "node:child_process";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { promisify } from "node:util";
+import { resolvePythonBinary } from "@/lib/python-runtime";
 
 const USGS_FDSN = "https://earthquake.usgs.gov/fdsnws/event/1/query";
+const execFileAsync = promisify(execFile);
 
 export async function GET(req: NextRequest) {
   try {
@@ -22,6 +28,11 @@ export async function GET(req: NextRequest) {
     const days = [20, 30, 40, 50].includes(requestedDays) ? requestedDays : 30;
     const minMag = [4, 5, 6, 7, 8, 9].includes(requestedMinMag) ? requestedMinMag : 6;
     const limit = Math.min(50, Math.max(20, Math.floor(requestedLimit) || 30));
+
+    if (process.env.QUAKE_OFFLINE === "1") {
+      const local = await fetchLocalRecent(days, minMag, limit);
+      return NextResponse.json(local);
+    }
 
     const end = new Date();
     const start = new Date(end.getTime() - days * 86400 * 1000);
@@ -65,6 +76,42 @@ export async function GET(req: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+async function fetchLocalRecent(days: number, minMag: number, limit: number) {
+  const db = await catalogDbPath();
+  if (!db) return { ok: false, error: "离线目录库不可用" };
+  const script = path.join(process.cwd(), "scripts", "search_usgs_catalog.py");
+  const { stdout } = await execFileAsync(resolvePythonBinary(), [
+    script,
+    "--db",
+    db,
+    "--spec-json",
+    JSON.stringify({ latestDays: days, minMag, page: 1, pageSize: limit }),
+  ], { timeout: 8000, maxBuffer: 1024 * 1024 });
+  const result = JSON.parse(stdout);
+  return {
+    ok: true,
+    events: result.events || [],
+    offline: true,
+    note: `离线目录截至 ${result.catalogEnd || "未知时间"}`,
+  };
+}
+
+async function catalogDbPath() {
+  const candidates = [
+    process.env.QUAKE_USGS_CATALOG_DB,
+    path.join(process.cwd(), "var", "usgs_catalog.sqlite"),
+  ].filter(Boolean) as string[];
+  for (const candidate of candidates) {
+    try {
+      await fs.access(candidate);
+      return candidate;
+    } catch {
+      // try next path
+    }
+  }
+  return null;
 }
 
 function parseCsv(text: string): Record<string, string>[] {
