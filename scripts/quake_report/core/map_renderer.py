@@ -6,8 +6,8 @@
 - 红色圆，按震级 5 档大小分级（3≤M<4 / 4≤M<5 / 5≤M<6 / 6≤M<7 / M≥7）
 - 黑色断层线（来自 GEM Global Active Faults）
 - 陆地填色（Natural Earth）；国内事件叠加天地图/BOUL 边界
-- 以震中为中心的方位等距投影，让半径内点云保持圆形距离观感
-- 比例尺
+- 经纬度直角投影，保持边框和经纬线横平竖直
+- 图外比例尺
 - 经纬度刻度
 - 右下角中文图例
 """
@@ -29,7 +29,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.lines import Line2D
-from matplotlib.patches import FancyBboxPatch
 
 import cartopy
 import cartopy.crs as ccrs
@@ -49,7 +48,7 @@ TIANDITU_CHINA_GEOJSON = CHINA_BOUNDARY_DIR / "tianditu_china_level2.geojson"
 TIANDITU_CHINA_CITIES = CHINA_BOUNDARY_DIR / "tianditu_china_cities.json"
 CHINA_BBOX = (70.0, 140.0, 3.0, 56.0)
 MAP_OUTPUT_UNIT = "中国地震局工程力学研究所 强震动观测中心"
-LAND_COLOR = "#f6d4a0"
+LAND_COLOR = "#f8e3c4"
 OCEAN_COLOR = "#abc7df"
 
 # ----------------------------------------------------------------------------
@@ -146,6 +145,34 @@ def _bbox_around(lat: float, lon: float, radius_km: float, pad_factor: float = 1
     )
 
 
+def _expand_bbox_for_points(
+    bbox: tuple[float, float, float, float],
+    points: pd.DataFrame,
+    margin_ratio: float = 0.10,
+) -> tuple[float, float, float, float]:
+    """Expand the visual map extent so plotted points do not sit on the frame."""
+    min_lon, max_lon, min_lat, max_lat = bbox
+    if not points.empty:
+        lon = pd.to_numeric(points.get("longitude"), errors="coerce").dropna()
+        lat = pd.to_numeric(points.get("latitude"), errors="coerce").dropna()
+        if not lon.empty and not lat.empty:
+            min_lon = min(min_lon, float(lon.min()))
+            max_lon = max(max_lon, float(lon.max()))
+            min_lat = min(min_lat, float(lat.min()))
+            max_lat = max(max_lat, float(lat.max()))
+
+    lon_span = max(max_lon - min_lon, 0.1)
+    lat_span = max(max_lat - min_lat, 0.1)
+    lon_pad = lon_span * margin_ratio
+    lat_pad = lat_span * margin_ratio
+    return (
+        max(-180.0, min_lon - lon_pad),
+        min(180.0, max_lon + lon_pad),
+        max(-90.0, min_lat - lat_pad),
+        min(90.0, max_lat + lat_pad),
+    )
+
+
 def render_distribution_map(
     mainshock: MainShock,
     catalog: pd.DataFrame,
@@ -172,15 +199,20 @@ def render_distribution_map(
 
     lat0, lon0 = mainshock.latitude, mainshock.longitude
     radius_km = query.max_radius_km
+    map_catalog = _catalog_for_map_display(catalog, min_mag=4.0 if map_view == "m4" else None)
 
     # bbox
-    min_lon, max_lon, min_lat, max_lat = _bbox_around(lat0, lon0, radius_km, pad_factor=1.32)
+    min_lon, max_lon, min_lat, max_lat = _bbox_around(lat0, lon0, radius_km, pad_factor=1.50)
+    min_lon, max_lon, min_lat, max_lat = _expand_bbox_for_points(
+        (min_lon, max_lon, min_lat, max_lat),
+        map_catalog,
+    )
 
     # 画布
     fig = plt.figure(figsize=(8.5, 7.0), constrained_layout=False)
     data_crs = ccrs.PlateCarree()
-    map_crs = ccrs.AzimuthalEquidistant(central_longitude=lon0, central_latitude=lat0)
-    ax = fig.add_axes([0.08, 0.12, 0.88, 0.74], projection=map_crs)
+    map_crs = data_crs
+    ax = fig.add_axes([0.08, 0.17, 0.88, 0.69], projection=map_crs)
     ax.set_extent([min_lon, max_lon, min_lat, max_lat], crs=data_crs)
 
     # ---- 地理底图要素 ----
@@ -212,7 +244,6 @@ def render_distribution_map(
         _draw_global_city_labels(ax, min_lon, max_lon, min_lat, max_lat, lon0, lat0, data_crs)
 
     # ---- 历史地震圆点 ----
-    map_catalog = _catalog_for_map_display(catalog, min_mag=4.0 if map_view == "m4" else None)
     if not map_catalog.empty:
         if map_view == "time":
             dated = map_catalog.copy()
@@ -271,12 +302,9 @@ def render_distribution_map(
             fontsize=12, pad=14, fontproperties=_map_font(True),
         )
 
-    # ---- 比例尺 ----
-    _draw_scale_bar(ax, min_lon, max_lon, min_lat, max_lat, data_crs)
-
     # ---- 图例（右下角） ----
     _draw_legend(ax, mainshock, map_view=map_view)
-    _draw_map_footer(fig, ax)
+    _draw_map_footer(fig, ax, min_lon, max_lon, min_lat, max_lat)
 
     # 保存
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
@@ -285,15 +313,16 @@ def render_distribution_map(
     return output_path
 
 
-def _draw_map_footer(fig, ax):
+def _draw_map_footer(fig, ax, min_lon, max_lon, min_lat, max_lat):
     box = ax.get_position()
-    y = max(0.025, box.y0 - 0.035)
+    footer_y = max(0.048, box.y0 - 0.045)
     today = datetime.now().strftime("%Y年%m月%d日")
-    fig.text(box.x0, y, f"产出单位：{MAP_OUTPUT_UNIT}",
-             ha="left", va="center", fontsize=8.5, color="#333",
+    _draw_scale_bar(fig, box, min_lon, max_lon, min_lat, max_lat, footer_y)
+    fig.text(box.x0, footer_y, f"产出单位：{MAP_OUTPUT_UNIT}",
+             ha="left", va="baseline", fontsize=8.5, color="#333",
              fontproperties=_map_font())
-    fig.text(box.x1, y, today,
-             ha="right", va="center", fontsize=8.5, color="#333",
+    fig.text(box.x0 + box.width * 0.56, footer_y, today,
+             ha="center", va="baseline", fontsize=8.5, color="#333",
              fontproperties=_map_font())
 
 
@@ -319,29 +348,35 @@ def _adaptive_point_style(size: float, bin_count: int, total_count: int, hi: flo
     return 8.0, 0.34, True
 
 
-def _draw_scale_bar(ax, min_lon, max_lon, min_lat, max_lat, proj):
-    """画一个简单的比例尺。长度根据纬度自适应。"""
+def _draw_scale_bar(fig, box, min_lon, max_lon, min_lat, max_lat, footer_y):
+    """在底部右侧绘制固定 100 km 括号式比例尺。"""
     lon_span = max_lon - min_lon
     lat_span = max_lat - min_lat
     lat_ref = min_lat + lat_span / 2
     km_per_deg_lon = 111.32 * max(np.cos(np.radians(lat_ref)), 0.1)
-    # 取一个接近图宽 1/5 的常用长度；200 km 查询半径常落到 100 km。
-    candidates = [5, 10, 20, 50, 100, 150, 200, 500, 1000]
-    target_km = lon_span * km_per_deg_lon * 0.22
-    bar_km = min(candidates, key=lambda x: abs(x - target_km))
+    bar_km = 100
     bar_deg = bar_km / km_per_deg_lon
 
-    x0 = min_lon + 0.06 * lon_span
-    y0 = min_lat + 0.08 * lat_span
-    x1 = x0 + bar_deg
-    tick_h = 0.05 * lat_span
-
-    ax.plot([x0, x1], [y0, y0], color="black", linewidth=2.5, transform=proj, zorder=20)
-    ax.plot([x0, x0], [y0, y0 + tick_h], color="black", linewidth=1.5, transform=proj, zorder=20)
-    ax.plot([x1, x1], [y0, y0 + tick_h], color="black", linewidth=1.5, transform=proj, zorder=20)
-    ax.text((x0 + x1) / 2, y0 + tick_h * 1.15, f"{bar_km} km",
-            ha="center", va="bottom", fontsize=8, transform=proj, zorder=20,
-            fontproperties=_map_font())
+    bar_width = box.width * (bar_deg / lon_span)
+    x1 = box.x1
+    x0 = x1 - bar_width
+    y_top = footer_y + 0.024
+    y_bottom = footer_y + 0.014
+    line_color = "#2d241c"
+    line_width = 0.85
+    for xs, ys in (
+        ([x0, x1], [y_top, y_top]),
+        ([x0, x0], [y_top, y_bottom]),
+        ([x1, x1], [y_top, y_bottom]),
+    ):
+        line = Line2D(xs, ys, transform=fig.transFigure, color=line_color,
+                      linewidth=line_width, solid_capstyle="butt", zorder=92)
+        fig.add_artist(line)
+    fig.text(
+        (x0 + x1) / 2, footer_y, f"{bar_km} km",
+        ha="center", va="baseline", fontsize=8.5, color=line_color,
+        fontproperties=_map_font(), zorder=92,
+    )
 
 
 def _intersects_bbox(a, b) -> bool:
