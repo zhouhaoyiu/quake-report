@@ -208,7 +208,7 @@ def _default_slug(mainshock: MainShock, tz: str = "utc") -> str:
     t = _title_date(mainshock, tz)
     place = (mainshock.place or "震中区").split(",")[0].strip()
     place = "".join(c for c in place if c not in '\\/:*?"<>|').strip()[:32] or "震中区"
-    return f"{t.year}年{t.month}月{t.day}日{place}M{mainshock.magnitude:.1f}地震震中区历史地震简报"
+    return f"{t.year}年{t.month}月{t.day}日{place}{mainshock.mag_type}{mainshock.magnitude:.1f}地震震中区历史地震简报"
 
 
 def _title_date(mainshock: MainShock, tz: str) -> datetime:
@@ -219,20 +219,20 @@ def _default_title_zh(mainshock: MainShock, tz: str = "utc") -> str:
     t = _title_date(mainshock, tz)
     place = (mainshock.place or "").split(",")[0].strip()[:24]
     name = f"{place} " if place and place.isascii() else place
-    return f"{t.year}年{t.month}月{t.day}日{name}M{mainshock.magnitude:.1f}地震 震中区历史地震活动分析"
+    return f"{t.year}年{t.month}月{t.day}日{name}{mainshock.mag_type}{mainshock.magnitude:.1f}地震 震中区历史地震活动分析"
 
 
 def _default_map_title_zh(mainshock: MainShock, tz: str = "utc") -> str:
     t = _title_date(mainshock, tz)
     place = (mainshock.place or "").split(",")[0].strip()[:24]
     name = f"{place} " if place and place.isascii() else place
-    return f"{t.year}年{t.month}月{t.day}日{name}M{mainshock.magnitude:.1f}地震 震中区历史地震分布图"
+    return f"{t.year}年{t.month}月{t.day}日{name}{mainshock.mag_type}{mainshock.magnitude:.1f}地震 震中区历史地震分布图"
 
 
 def _default_title_en(mainshock: MainShock) -> str:
     place = (mainshock.place or "").split(",")[0].strip()
     name = f"{place} " if place else ""
-    return f"Seismicity around the {mainshock.time_utc:%Y-%m} {name}M{mainshock.magnitude:.1f} Earthquake"
+    return f"Seismicity around the {mainshock.time_utc:%Y-%m} {name}{mainshock.mag_type}{mainshock.magnitude:.1f} Earthquake"
 
 
 def _map_meta(catalog, map_view: str) -> dict:

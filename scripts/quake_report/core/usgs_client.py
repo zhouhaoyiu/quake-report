@@ -40,9 +40,20 @@ def _offline_mode() -> bool:
 
 def normalize_mag_type(value: str | None) -> str:
     mag_type = str(value or "Mw").strip()
-    if mag_type.upper().startswith("MW"):
-        return "MW"
-    return mag_type.upper()
+    key = mag_type.upper()
+    canonical = {
+        "M": "M",
+        "MW": "Mw",
+        "MWW": "Mww",
+        "MS": "Ms",
+        "MB": "Mb",
+        "ML": "Ml",
+    }
+    if key in canonical:
+        return canonical[key]
+    if key.startswith("MW"):
+        return "Mw"
+    return key
 
 
 def _get_text(url: str, *, params: dict | None = None, timeout: int = 30, cache_ttl: int | None = None):

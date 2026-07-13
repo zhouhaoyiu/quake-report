@@ -877,7 +877,7 @@ def build_report(
         title_time = mainshock.time_utc + timedelta(hours=8) if tz in ("utc8", "cn", "both") else mainshock.time_utc
         title_zh = (
             f"{title_time.year}年{title_time.month}月{title_time.day}日"
-            f"{spacer}{place_short} M{mainshock.magnitude:.1f} 地震 震中区历史地震活动分析"
+            f"{spacer}{place_short} {mainshock.mag_type}{mainshock.magnitude:.1f} 地震 震中区历史地震活动分析"
         )
     doc = Document()
 

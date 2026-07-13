@@ -17,7 +17,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 import search_usgs_catalog
 import sync_usgs_catalog
-from quake_report.cli import _default_slug
+from quake_report.cli import _default_map_title_zh, _default_slug, _default_title_en, _default_title_zh
 from quake_report.core.catalog_export import write_catalog_csv
 from quake_report.core.docx_builder import _source_text_intro
 from quake_report.core.formatting import format_km
@@ -189,11 +189,27 @@ class CatalogToolTests(unittest.TestCase):
             time_utc=datetime(2026, 7, 3, 4, 4, tzinfo=timezone.utc),
             place="先岛诸岛",
             magnitude=6.2,
+            mag_type="Ms",
         )
         self.assertEqual(
             _default_slug(shock, "utc8"),
-            "2026年7月3日先岛诸岛M6.2地震震中区历史地震简报",
+            "2026年7月3日先岛诸岛Ms6.2地震震中区历史地震简报",
         )
+        self.assertIn("Ms6.2", _default_title_zh(shock, "utc8"))
+        self.assertIn("Ms6.2", _default_map_title_zh(shock, "utc8"))
+        self.assertIn("Ms6.2", _default_title_en(shock))
+
+    def test_magnitude_type_normalization_preserves_supported_labels(self):
+        for raw, expected in (
+            ("mw", "Mw"),
+            ("ms", "Ms"),
+            ("mb", "Mb"),
+            ("ml", "Ml"),
+            ("mww", "Mww"),
+            ("m", "M"),
+        ):
+            with self.subTest(raw=raw):
+                self.assertEqual(usgs_client.normalize_mag_type(raw), expected)
 
     def test_source_text_intro_prefixes_bulletin_once(self):
         text = "中国地震台网正式测定：07月03日12时04分，在先岛诸岛发生6.2级地震。"
