@@ -5,6 +5,7 @@ import os from "os";
 import fs from "fs/promises";
 import { getReportFile, MAX_REPORT_FILE_BYTES } from "@/lib/report-file-store";
 import { resolvePythonBinary } from "@/lib/python-runtime";
+import { errorMessage } from "@/lib/runtime-values";
 
 const PROJECT_ROOT = process.cwd();
 const PDF_SCRIPT = path.join(PROJECT_ROOT, "scripts", "quake_report", "pdf_convert.py");
@@ -51,8 +52,8 @@ export async function POST(req: NextRequest) {
         "Cache-Control": "no-store",
       },
     });
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message || String(e) }, { status: 500 });
+  } catch (e: unknown) {
+    return NextResponse.json({ ok: false, error: errorMessage(e) }, { status: 500 });
   } finally {
     await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
   }

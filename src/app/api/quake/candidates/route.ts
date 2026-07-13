@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { resolvePythonBinary } from "@/lib/python-runtime";
+import { errorMessage } from "@/lib/runtime-values";
 
 const execFileAsync = promisify(execFile);
 const PYTHON = resolvePythonBinary();
@@ -50,7 +51,7 @@ export async function GET(req: NextRequest) {
     ], { timeout: 8000, maxBuffer: 1024 * 1024 });
     const parsed = JSON.parse(stdout);
     return NextResponse.json(parsed?.ok ? parsed : { ok: true, events: [], note: "未找到候选事件" });
-  } catch (e: any) {
+  } catch (e: unknown) {
     return NextResponse.json({ ok: false, error: candidatePublicError(e) }, { status: 500 });
   }
 }
@@ -79,8 +80,8 @@ async function catalogDbPath() {
   return null;
 }
 
-export function candidatePublicError(e: any) {
-  const message = e?.message || String(e);
+export function candidatePublicError(e: unknown) {
+  const message = errorMessage(e);
   if (/timed out|timeout/i.test(message)) return "候选匹配超时，请手动补充年份或缩小半径";
   if (/Command failed|\/[\w.-]+\/|--spec-json|\.py\b|Traceback|JSONDecodeError/i.test(message)) {
     return "候选匹配失败，请手动确认参数后继续生成";

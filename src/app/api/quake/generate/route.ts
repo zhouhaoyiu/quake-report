@@ -46,6 +46,7 @@ import fs from "fs/promises";
 import { putReportFile } from "@/lib/report-file-store";
 import { resolvePythonBinary } from "@/lib/python-runtime";
 import { cancelPythonWorkerJob, runPythonWorker, workerEnabled } from "@/lib/python-worker";
+import { errorMessage, getGlobalValue } from "@/lib/runtime-values";
 
 const PROJECT_ROOT = process.cwd();
 const CLI_SCRIPT = path.join(PROJECT_ROOT, "scripts", "quake_report", "cli.py");
@@ -56,10 +57,62 @@ const MIME: Record<string, string> = {
   ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 };
 const GENERATION_CACHE_TTL_MS = 10 * 60_000;
-const generationCache: Map<string, { expires: number; result: any }> =
-  ((globalThis as any).__quakeGenerationCache ||= new Map());
-const generateRequests: Map<string, number[]> =
-  ((globalThis as any).__quakeGenerateRequests ||= new Map());
+
+interface GenerationRequest {
+  mode?: "manual" | "eventid" | "recent";
+  lat?: number;
+  lon?: number;
+  mag?: number;
+  time?: string;
+  depth?: number;
+  place?: string;
+  magType?: string;
+  sourceText?: string;
+  eventId?: string;
+  radiusKm?: number;
+  startTime?: string;
+  endTime?: string;
+  minMag?: number;
+  figNum?: string;
+  slug?: string;
+  titleZh?: string;
+  titleEn?: string;
+  noPdf?: boolean;
+  reportLevel?: unknown;
+  tz?: string;
+  mapView?: string;
+  stream?: boolean;
+}
+
+interface SummaryItem {
+  files: {
+    map?: string | null;
+    catalog?: string | null;
+    docx?: string | null;
+    pdf?: string | null;
+  };
+  mainshock?: Record<string, unknown>;
+  event_id?: string;
+  latitude?: number;
+  longitude?: number;
+  depth_km?: number;
+  magnitude?: number;
+  mag_type?: string;
+  time_utc?: string;
+  place?: string;
+  stats?: Record<string, unknown>;
+  mapMeta?: Record<string, unknown>;
+  warnings?: string[];
+}
+
+type GenerationResult = ReturnType<typeof buildResultPayload>;
+
+const generationCache = getGlobalValue("__quakeGenerationCache", () =>
+  new Map<string, { expires: number; result: GenerationResult }>(),
+);
+const generateRequests = getGlobalValue("__quakeGenerateRequests", () =>
+  new Map<string, number[]>(),
+);
 
 export async function POST(req: NextRequest) {
   try {
@@ -70,7 +123,7 @@ export async function POST(req: NextRequest) {
         { status: 429, headers: { "Retry-After": String(retryAfter) } },
       );
     }
-    const body = await req.json();
+    const body = (await req.json()) as GenerationRequest;
     const {
       mode = "manual",
       lat, lon, mag, time, depth, place, magType, sourceText,
@@ -157,10 +210,10 @@ export async function POST(req: NextRequest) {
     const result = await runPython(CLI_SCRIPT, args);
 
     // 读取摘要
-    let summary: any = null;
+    let summary: SummaryItem[] | null = null;
     try {
       const txt = await fs.readFile(jsonPath, "utf-8");
-      summary = JSON.parse(txt);
+      summary = JSON.parse(txt) as SummaryItem[];
       await fs.unlink(jsonPath).catch(() => {});
     } catch {
       // ignore
@@ -196,19 +249,19 @@ export async function POST(req: NextRequest) {
     } finally {
       await cleanupOutput(outputDir);
     }
-  } catch (e: any) {
+  } catch (e: unknown) {
     return NextResponse.json(
-      { ok: false, error: e?.message || String(e) },
+      { ok: false, error: errorMessage(e) },
       { status: 500 }
     );
   }
 }
 
-function generationCacheKey(value: any) {
+function generationCacheKey(value: Record<string, unknown>) {
   return createHash("sha1").update(JSON.stringify(value)).digest("hex");
 }
 
-function normalizeReportLevel(value: any) {
+function normalizeReportLevel(value: unknown) {
   if (value === "simple" || value === "medium" || value === "full") return value;
   return "simple";
 }
@@ -223,11 +276,11 @@ function getGenerationCache(key: string) {
   return hit.result;
 }
 
-function setGenerationCache(key: string, result: any) {
+function setGenerationCache(key: string, result: GenerationResult) {
   generationCache.set(key, { expires: Date.now() + GENERATION_CACHE_TTL_MS, result });
 }
 
-function streamCachedResult(result: any) {
+function streamCachedResult(result: GenerationResult) {
   const encoder = new TextEncoder();
   const body =
     `${JSON.stringify({ type: "progress", progress: 100, message: "参数未变，复用最近一次生成结果" })}\n` +
@@ -241,7 +294,7 @@ function streamCachedResult(result: any) {
   });
 }
 
-function buildResultPayload(item: any, canPdf = true) {
+function buildResultPayload(item: SummaryItem, canPdf = true) {
   const map = toStoredFile(item.files.map, false);
   const catalog = toStoredFile(item.files.catalog, true);
   const docx = toStoredFile(item.files.docx, true);
@@ -315,7 +368,7 @@ function streamPython(script: string, args: string[], jsonPath: string, outputDi
     start(controller) {
       const startedAt = Date.now();
       let lastStageAt = startedAt;
-      const send = (payload: any) => {
+      const send = (payload: unknown) => {
         if (finished) return false;
         try {
           controller.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
@@ -327,7 +380,7 @@ function streamPython(script: string, args: string[], jsonPath: string, outputDi
           return false;
         }
       };
-      const finish = async (payload: any) => {
+      const finish = async (payload: unknown) => {
         if (finished) return;
         finished = true;
         try {
@@ -395,7 +448,7 @@ function streamPython(script: string, args: string[], jsonPath: string, outputDi
 
           try {
             const txt = await fs.readFile(jsonPath, "utf-8");
-            const summary = JSON.parse(txt);
+            const summary = JSON.parse(txt) as SummaryItem[];
             await fs.unlink(jsonPath).catch(() => {});
             const item = summary?.[0];
             if (!item) throw new Error("未获取到生成摘要");
@@ -406,7 +459,7 @@ function streamPython(script: string, args: string[], jsonPath: string, outputDi
               progress: 100,
               result,
             });
-          } catch (e: any) {
+          } catch {
             await finish({
               type: "done",
               result: { ok: false, error: "生成失败：未获取到报告摘要" },
@@ -476,8 +529,8 @@ function streamPython(script: string, args: string[], jsonPath: string, outputDi
           });
         });
         child.on("close", closeJob);
-      } catch (e: any) {
-        void finish({ type: "done", result: { ok: false, error: e?.message || String(e) } });
+      } catch (e: unknown) {
+        void finish({ type: "done", result: { ok: false, error: errorMessage(e) } });
       }
     },
     cancel() {

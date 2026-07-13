@@ -7,7 +7,7 @@
     "dev": "next dev -p 3000",
     "build": "next build && cp -r .next/static .next/standalone/.next/ && cp -r public scripts data .next/standalone/",
     "start": "NODE_ENV=production bun .next/standalone/server.js",
-    "lint": "eslint .",
+    "lint": "oxlint --deny typescript/no-explicit-any .",
     "test": "python3 -m unittest discover -s tests && bun test ./tests"
   },
   "dependencies": {
@@ -32,10 +32,10 @@
     "@types/node": "^26.0.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
-    "eslint": "^9.39.4",
-    "eslint-config-next": "^16.2.9",
+    "@typescript/native-preview": "^7.0.0-dev.20260707.2",
+    "oxlint": "1.73.0",
     "tailwindcss": "^4.3.2",
     "tw-animate-css": "^1.4.0",
-    "typescript": "^5.9.3"
+    "typescript": "7.0.2"
   }
 }
