@@ -1,7 +1,8 @@
+import { getGlobalValue } from "@/lib/runtime-values";
+
 type Entry = { expires: number; text: string; status: number; cacheHit?: boolean; stale?: boolean };
 
-const store: Map<string, Entry> =
-  ((globalThis as any).__quakeUsgsCache ||= new Map<string, Entry>());
+const store = getGlobalValue("__quakeUsgsCache", () => new Map<string, Entry>());
 
 export async function cachedFetchText(url: string, ttlMs: number, init?: RequestInit, staleMs = 0) {
   const key = `${url}`;
@@ -23,10 +24,10 @@ export async function cachedFetchText(url: string, ttlMs: number, init?: Request
   }
 }
 
-export async function cachedFetchJson(url: string, ttlMs: number, init?: RequestInit) {
+export async function cachedFetchJson<T = unknown>(url: string, ttlMs: number, init?: RequestInit) {
   const res = await cachedFetchText(url, ttlMs, init);
   try {
-    return { status: res.status, json: JSON.parse(res.text), cacheHit: Boolean(res.cacheHit) };
+    return { status: res.status, json: JSON.parse(res.text) as T, cacheHit: Boolean(res.cacheHit) };
   } catch {
     throw new Error("上游服务返回格式异常，请稍后重试");
   }

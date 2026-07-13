@@ -15,6 +15,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { resolvePythonBinary } from "@/lib/python-runtime";
+import { errorMessage } from "@/lib/runtime-values";
 
 const USGS_FDSN = "https://earthquake.usgs.gov/fdsnws/event/1/query";
 const execFileAsync = promisify(execFile);
@@ -58,7 +59,7 @@ export async function GET(req: NextRequest) {
       );
     }
     const csv = r.text;
-    const events = parseCsv(csv).slice(0, limit).map((row: any) => ({
+    const events = parseCsv(csv).slice(0, limit).map((row) => ({
       eventId: row.id,
       time: row.time,
       latitude: Number(row.latitude),
@@ -70,9 +71,9 @@ export async function GET(req: NextRequest) {
     }));
 
     return NextResponse.json({ ok: true, events, cacheHit: Boolean(r.cacheHit), cacheStale: Boolean(r.stale) });
-  } catch (e: any) {
+  } catch (e: unknown) {
     return NextResponse.json(
-      { ok: false, error: e?.message || String(e) },
+      { ok: false, error: errorMessage(e) },
       { status: 500 }
     );
   }

@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { getGlobalValue } from "@/lib/runtime-values";
 
 type StoredReportFile = {
   buffer: Buffer;
@@ -12,8 +13,9 @@ export const MAX_REPORT_FILES = 64;
 export const MAX_REPORT_FILE_BYTES = 32 * 1024 * 1024;
 export const MAX_REPORT_STORE_BYTES = 128 * 1024 * 1024;
 
-const store: Map<string, StoredReportFile> =
-  ((globalThis as any).__quakeReportFileStore ||= new Map<string, StoredReportFile>());
+const store = getGlobalValue("__quakeReportFileStore", () =>
+  new Map<string, StoredReportFile>(),
+);
 
 function cleanupExpired() {
   const now = Date.now();

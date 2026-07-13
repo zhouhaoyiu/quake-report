@@ -5,6 +5,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { resolvePythonBinary } from "@/lib/python-runtime";
+import { errorMessage, getGlobalValue } from "@/lib/runtime-values";
 
 const FDSN_QUERY = "https://earthquake.usgs.gov/fdsnws/event/1/query";
 const FDSN_COUNT = "https://earthquake.usgs.gov/fdsnws/event/1/count";
@@ -14,8 +15,58 @@ const TEXT_CANDIDATE_LIMIT = 500;
 const execFileAsync = promisify(execFile);
 const PYTHON = resolvePythonBinary();
 const SEARCH_CACHE_TTL_MS = 5 * 60_000;
-const searchCache: Map<string, { expires: number; payload: any }> =
-  ((globalThis as any).__quakeSearchCache ||= new Map());
+
+interface SearchSpec {
+  start: string;
+  end: string;
+  minMag: number;
+  radiusKm: number;
+  text: string;
+  eventId?: string;
+  lat?: number;
+  lon?: number;
+}
+
+interface QuakeEvent {
+  eventId: string;
+  time: string;
+  latitude: number;
+  longitude: number;
+  depth: number;
+  mag: number;
+  magType: string;
+  place: string;
+}
+
+interface SearchPayload {
+  ok: boolean;
+  events: QuakeEvent[];
+  page: number;
+  pageSize: number;
+  total: number;
+  cacheHit?: boolean;
+  localCatalog?: boolean;
+  note?: string;
+}
+
+interface UsgsFeature {
+  id?: string;
+  geometry?: { coordinates?: number[] };
+  properties?: {
+    mag?: number;
+    time?: number;
+    magType?: string;
+    place?: string;
+  };
+}
+
+interface UsgsFeatureCollection {
+  features?: UsgsFeature[];
+}
+
+const searchCache = getGlobalValue("__quakeSearchCache", () =>
+  new Map<string, { expires: number; payload: SearchPayload }>(),
+);
 
 export async function GET(req: NextRequest) {
   try {
@@ -47,7 +98,7 @@ export async function GET(req: NextRequest) {
       const fetched = await fetchEvents(params);
       const events = fetched.events;
       const term = spec.text.toLowerCase();
-      const filtered = events.filter((event: any) =>
+      const filtered = events.filter((event) =>
         event.place.toLowerCase().includes(term) || event.eventId.toLowerCase().includes(term)
       );
       const start = (page - 1) * PAGE_SIZE;
@@ -75,17 +126,17 @@ export async function GET(req: NextRequest) {
       cacheHit: fetched.cacheHit,
       note: fetched.cacheHit ? "结果来自缓存" : "",
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
     return NextResponse.json({ ok: false, error: searchError(e) }, { status: 500 });
   }
 }
 
-function searchError(e: any) {
-  const message = e?.message || String(e);
+function searchError(e: unknown) {
+  const message = errorMessage(e);
   return /timed out|timeout/i.test(message) ? "查询超时，请稍后重试或缩小检索条件" : message;
 }
 
-function cachedJson(key: string, payload: any) {
+function cachedJson(key: string, payload: SearchPayload) {
   searchCache.set(key, { expires: Date.now() + SEARCH_CACHE_TTL_MS, payload });
   return NextResponse.json(payload);
 }
@@ -100,7 +151,7 @@ function getSearchCache(key: string) {
   return hit.payload;
 }
 
-async function searchLocalCatalog(spec: any, page: number) {
+async function searchLocalCatalog(spec: SearchSpec, page: number) {
   const db = await catalogDbPath();
   if (!db) return null;
   try {
@@ -112,7 +163,7 @@ async function searchLocalCatalog(spec: any, page: number) {
       "--spec-json",
       JSON.stringify({ ...spec, page, pageSize: PAGE_SIZE }),
     ], { timeout: 5000, maxBuffer: 1024 * 1024 });
-    const parsed = JSON.parse(stdout);
+    const parsed = JSON.parse(stdout) as SearchPayload;
     return parsed?.ok ? parsed : null;
   } catch {
     return null;
@@ -140,7 +191,7 @@ function eventIdFromQuery(q: string) {
   return /^[a-z]{2}\d[\w-]{4,}$/i.test(q) ? q : "";
 }
 
-function buildParams(spec: any) {
+function buildParams(spec: SearchSpec) {
   const params = new URLSearchParams({
       format: "geojson",
       starttime: spec.start,
@@ -157,14 +208,14 @@ function buildParams(spec: any) {
 }
 
 async function fetchEvents(params: URLSearchParams) {
-  const r = await cachedFetchJson(`${FDSN_QUERY}?${params}`, 3600_000, {
+  const r = await cachedFetchJson<UsgsFeatureCollection>(`${FDSN_QUERY}?${params}`, 3600_000, {
     signal: AbortSignal.timeout(20000),
   });
   if (r.status >= 400) throw new Error(`USGS 返回 ${r.status}`);
   const json = r.json;
   return {
-    events: (json.features || []).map(featureToEvent).filter(Boolean),
-    cacheHit: Boolean((r as any).cacheHit),
+    events: (json.features || []).map(featureToEvent).filter((event): event is QuakeEvent => event !== null),
+    cacheHit: Boolean(r.cacheHit),
   };
 }
 
@@ -183,7 +234,7 @@ async function fetchCount(params: URLSearchParams) {
 
 async function findByEventId(q: string) {
   if (!/^[a-z]{2}\d[\w-]{4,}$/i.test(q)) return null;
-  const r = await cachedFetchJson(`${DETAIL_BASE}/${encodeURIComponent(q)}.geojson`, 3600_000, {
+  const r = await cachedFetchJson<UsgsFeature>(`${DETAIL_BASE}/${encodeURIComponent(q)}.geojson`, 3600_000, {
     signal: AbortSignal.timeout(10000),
   });
   if (r.status >= 400) return null;
@@ -192,7 +243,7 @@ async function findByEventId(q: string) {
 
 function parseQuery(q: string) {
   const now = new Date();
-  const spec: any = {
+  const spec: SearchSpec = {
     start: "1900-01-01",
     end: now.toISOString().slice(0, 10),
     minMag: 3,
@@ -252,9 +303,9 @@ function parseQuery(q: string) {
   return spec;
 }
 
-function featureToEvent(feature: any) {
-  const coords = feature?.geometry?.coordinates || [];
-  const props = feature?.properties || {};
+function featureToEvent(feature: UsgsFeature) {
+  const coords = feature.geometry?.coordinates || [];
+  const props = feature.properties || {};
   if (!feature?.id || coords.length < 3 || props.mag == null || !props.time) return null;
   return {
     eventId: feature.id,

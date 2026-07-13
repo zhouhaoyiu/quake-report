@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import path from "path";
 import fs from "fs";
+import { errorMessage } from "@/lib/runtime-values";
 
 const DOWNLOAD_DIR = path.join(process.cwd(), "download");
 
@@ -51,9 +52,9 @@ export async function GET(
     });
     // PDF 和 docx 直接 inline 预览；图片直接 inline
     return res;
-  } catch (e: any) {
+  } catch (e: unknown) {
     return NextResponse.json(
-      { error: e?.message || String(e) },
+      { error: errorMessage(e) },
       { status: 500 }
     );
   }

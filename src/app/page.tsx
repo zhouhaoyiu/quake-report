@@ -48,6 +48,7 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { parseQuakeText, type ParsedQuakeText } from "@/lib/quake-text-parser";
+import { errorMessage } from "@/lib/runtime-values";
 import {
   Table,
   TableBody,
@@ -62,6 +63,27 @@ type SourcePanel = "catalog" | "input";
 type MapView = "mag" | "m4" | "time";
 type TimezoneMode = "utc" | "utc8" | "both";
 type ReportLevel = "simple" | "medium" | "full";
+
+interface GenerationRequestBody {
+  mode: Mode;
+  radiusKm: number;
+  minMag: number;
+  figNum: string;
+  slug?: string;
+  noPdf: boolean;
+  reportLevel: ReportLevel;
+  tz: TimezoneMode;
+  mapView: MapView;
+  place?: string;
+  lat?: number;
+  lon?: number;
+  mag?: number;
+  time?: string;
+  depth?: number;
+  magType?: string;
+  sourceText?: string;
+  eventId?: string;
+}
 
 interface SavedSettings {
   radiusKm: string;
@@ -149,14 +171,34 @@ interface GenResult {
     docx?: ReportFileRef | null;
     pdf?: ReportFileRef | null;
   };
-  mainshock?: any;
-  stats?: any;
+  mainshock?: ReportMainshock;
+  stats?: ReportStats;
   mapMeta?: { view: MapView; display_count: number; total_count: number };
   warnings?: string[];
   canPdf?: boolean;
   cacheHit?: boolean;
   note?: string;
   error?: string;
+}
+
+interface ReportMainshock {
+  time_utc?: string;
+  latitude?: number;
+  longitude?: number;
+  mag_type?: string;
+  magnitude?: number;
+  depth_km?: number;
+}
+
+interface ReportStats {
+  total_count?: number;
+  n3?: number;
+  n4?: number;
+  n5?: number;
+  n6?: number;
+  n7?: number;
+  n8?: number;
+  mc_estimate?: number;
 }
 
 interface ReportFileRef {
@@ -258,7 +300,6 @@ export default function Home() {
   const [cacheNote, setCacheNote] = useState("");
   const [result, setResult] = useState<GenResult | null>(null);
   const [pdfLoading, setPdfLoading] = useState(false);
-  const [pdfStatus, setPdfStatus] = useState("");
 
   useEffect(() => {
     controlsLockedRef.current = controlsLocked;
@@ -406,9 +447,9 @@ export default function Home() {
         setCatalogSearchResults(j.events || []);
         setCatalogSearchTotal(j.total || 0);
         setCatalogSearchNote(j.note || "");
-      } catch (e: any) {
-        if (e?.name !== "AbortError" && !controlsLockedRef.current) {
-          setCatalogSearchError(e?.message || String(e));
+      } catch (e: unknown) {
+        if (!(e instanceof Error && e.name === "AbortError") && !controlsLockedRef.current) {
+          setCatalogSearchError(errorMessage(e));
           setCatalogSearchResults([]);
           setCatalogSearchTotal(0);
           setCatalogSearchNote("");
@@ -457,10 +498,10 @@ export default function Home() {
         if (controlsLockedRef.current) return;
         setBulletinCandidates(j.events || []);
         setBulletinCandidateNote(j.note || "");
-      } catch (e: any) {
-        if (e?.name !== "AbortError" && !controlsLockedRef.current) {
+      } catch (e: unknown) {
+        if (!(e instanceof Error && e.name === "AbortError") && !controlsLockedRef.current) {
           setBulletinCandidates([]);
-          setBulletinCandidateError(e?.message || String(e));
+          setBulletinCandidateError(errorMessage(e));
           setBulletinCandidateNote("");
         }
       } finally {
@@ -556,11 +597,11 @@ export default function Home() {
         title: "已找到事件",
         description: `${formatEventTime(ev.time)} · M${ev.mag.toFixed(1)} · ${ev.place}`,
       });
-    } catch (e: any) {
+    } catch (e: unknown) {
       toast({
         variant: "destructive",
         title: "查询失败",
-        description: publicError(e?.message || String(e)),
+        description: publicError(errorMessage(e)),
       });
     } finally {
       setEventIdLookupLoading(false);
@@ -638,7 +679,7 @@ export default function Home() {
   }
 
   function buildRequestBody() {
-    const body: any = {
+    const body: GenerationRequestBody = {
       mode,
       radiusKm: Number(radiusKm),
       minMag: Number(minMag),
@@ -710,11 +751,11 @@ export default function Home() {
       if (!cj.ok || typeof cj.count !== "number") throw new Error(cj.error || "预估失败");
       if (controlsLockedRef.current) return;
       setCatalogCount(cj.count);
-    } catch (e: any) {
+    } catch (e: unknown) {
       toast({
         variant: "destructive",
         title: "预估失败",
-        description: publicError(e?.message || String(e)),
+        description: publicError(errorMessage(e)),
       });
     } finally {
       setCountLoading(false);
@@ -755,11 +796,11 @@ export default function Home() {
           description: publicError(j.error || "未知错误"),
         });
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       toast({
         variant: "destructive",
         title: "拉取失败",
-        description: publicError(e?.message || String(e)),
+        description: publicError(errorMessage(e)),
       });
     } finally {
       setRecentLoading(false);
@@ -836,11 +877,11 @@ export default function Home() {
           description: publicError(j.error),
         });
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       toast({
         variant: "destructive",
         title: "请求失败",
-        description: publicError(e?.message || String(e)),
+        description: publicError(errorMessage(e)),
       });
     } finally {
       controlsLockedRef.current = false;
@@ -919,11 +960,11 @@ export default function Home() {
         throw new Error(j.error || "文件已过期，请重新生成报告");
       }
       downloadBlob(await r.blob(), fileName);
-    } catch (e: any) {
+    } catch (e: unknown) {
       toast({
         variant: "destructive",
         title,
-        description: publicError(e?.message || String(e)),
+        description: publicError(errorMessage(e)),
       });
     }
   }
@@ -935,7 +976,6 @@ export default function Home() {
       return;
     }
     setPdfLoading(true);
-    setPdfStatus("正在启动 PDF 转换...");
     try {
       const r = await fetch("/api/quake/pdf", {
         method: "POST",
@@ -950,7 +990,6 @@ export default function Home() {
         const j = await r.json().catch(() => ({}));
         throw new Error(j.error || "PDF 转换失败");
       }
-      setPdfStatus("PDF 已生成，正在下载...");
       const blob = await r.blob();
       const fileName = (result.fileNames?.docx || "report.docx").replace(/\.docx$/i, ".pdf");
       const objectUrl = URL.createObjectURL(blob);
@@ -970,15 +1009,14 @@ export default function Home() {
         },
       } : prev);
       downloadBlob(blob, fileName);
-    } catch (e: any) {
+    } catch (e: unknown) {
       toast({
         variant: "destructive",
         title: "PDF 转换失败",
-        description: publicError(e?.message || String(e)),
+        description: publicError(errorMessage(e)),
       });
     } finally {
       setPdfLoading(false);
-      setPdfStatus("");
     }
   }
 

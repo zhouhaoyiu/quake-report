@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { resolvePythonBinary } from "@/lib/python-runtime";
+import { getGlobalValue, isRecord } from "@/lib/runtime-values";
 
 type Handlers = {
   onQueued?: (position: number) => void;
@@ -33,13 +34,13 @@ type CurrentJob = {
 const WORKER_SCRIPT = path.join(process.cwd(), "scripts", "quake_report", "worker.py");
 const MAX_JOBS = Math.max(1, Number(process.env.QUAKE_MAX_JOBS || 8));
 const JOB_TIMEOUT_MS = Math.max(10_000, Number(process.env.QUAKE_JOB_TIMEOUT_MS || 180_000));
-const state: WorkerState = ((globalThis as any).__quakePythonWorker ||= {
+const state = getGlobalValue<WorkerState>("__quakePythonWorker", () => ({
   proc: null,
   pending: "",
   current: null,
   queue: [],
   timer: null,
-});
+}));
 
 export function workerEnabled() {
   return process.env.QUAKE_PYTHON_WORKER === "1";
@@ -124,23 +125,26 @@ function onWorkerStdout(text: string) {
 }
 
 function handleFrame(line: string) {
-  let frame: any;
+  let frame: unknown;
   try {
     frame = JSON.parse(line);
   } catch {
     if (state.current) state.current.stdout += `${line}\n`;
     return;
   }
+  if (!isRecord(frame)) return;
   const job = state.current;
   if (!job || frame.type === "ready") return;
   if (frame.type === "stdout") {
-    job.stdout += `${frame.line}\n`;
-    job.handlers.onStdoutLine?.(frame.line);
+    const text = String(frame.line ?? "");
+    job.stdout += `${text}\n`;
+    job.handlers.onStdoutLine?.(text);
     return;
   }
   if (frame.type === "stderr") {
-    job.stderr += `${frame.line}\n`;
-    job.handlers.onStderrLine?.(frame.line);
+    const text = String(frame.line ?? "");
+    job.stderr += `${text}\n`;
+    job.handlers.onStderrLine?.(text);
     return;
   }
   if (frame.type === "exit") {
