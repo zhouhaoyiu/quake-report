@@ -321,7 +321,7 @@ def _draw_map_footer(fig, ax, min_lon, max_lon, min_lat, max_lat):
     fig.text(box.x0, footer_y, f"产出单位：{MAP_OUTPUT_UNIT}",
              ha="left", va="baseline", fontsize=8.5, color="#333",
              fontproperties=_map_font())
-    fig.text(box.x0 + box.width * 0.56, footer_y, today,
+    fig.text(box.x0 + box.width * 0.65, footer_y, today,
              ha="center", va="baseline", fontsize=8.5, color="#333",
              fontproperties=_map_font())
 
