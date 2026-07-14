@@ -1,6 +1,6 @@
 # macOS 离线包使用说明
 
-适用文件：`quake-report-offline-macos-arm64-20260710.tar.gz`
+适用文件：`quake-report-offline-macos-arm64-20260715.tar.gz`
 
 这个包只适用于 Apple Silicon Mac，也就是 M1、M2、M3、M4 等 M 系列芯片。Intel Mac、Windows 和 Linux 不能使用包内运行环境。
 
@@ -27,10 +27,10 @@
 1. 双击压缩包解压，或在终端运行：
 
    ```bash
-   tar -xzf quake-report-offline-macos-arm64-20260710.tar.gz
+   tar -xzf quake-report-offline-macos-arm64-20260715.tar.gz
    ```
 
-2. 打开解压后的 `quake-report-offline-macos-arm64-20260710` 文件夹。
+2. 打开解压后的 `quake-report-offline-macos-arm64-20260715` 文件夹。
 3. 双击 `START-MAC-LINUX.command`。
 4. 如果 macOS 提示无法验证开发者，右键点击该文件，选择“打开”，再确认一次。
 5. 等待浏览器自动打开：

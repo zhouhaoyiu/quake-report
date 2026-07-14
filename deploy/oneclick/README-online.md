@@ -2,8 +2,8 @@
 
 适用文件：
 
-- Windows x64：`quake-report-online-windows-x64-20260710.zip`
-- Linux x64：`quake-report-online-linux-x64-20260710.tar.gz`
+- Windows x64：`quake-report-online-windows-x64-20260715.zip`
+- Linux x64：`quake-report-online-linux-x64-20260715.tar.gz`
 
 两个包分别对应 64 位 Windows 和 x86_64 Linux，运行环境不能跨平台混用。
 
@@ -28,8 +28,8 @@ Node.js 安装器和 Miniforge 安装器已经放在压缩包的 `.installers` �
 
 适用于普通 64 位 Windows 10 或 Windows 11 电脑。
 
-1. 完整解压 `quake-report-online-windows-x64-20260710.zip`。
-2. 进入解压后的 `quake-report-online-windows-x64-20260710` 文件夹。
+1. 完整解压 `quake-report-online-windows-x64-20260715.zip`。
+2. 进入解压后的 `quake-report-online-windows-x64-20260715` 文件夹。
 3. 双击 `START-WINDOWS.bat`。
 4. 保持命令窗口开启，等待首次安装完成。
 5. 浏览器会自动打开：
@@ -49,8 +49,8 @@ Node.js 安装器和 Miniforge 安装器已经放在压缩包的 `.installers` �
 1. 解压并进入目录：
 
    ```bash
-   tar -xzf quake-report-online-linux-x64-20260710.tar.gz
-   cd quake-report-online-linux-x64-20260710
+   tar -xzf quake-report-online-linux-x64-20260715.tar.gz
+   cd quake-report-online-linux-x64-20260715
    ```
 
 2. 启动：

@@ -2,15 +2,15 @@
 
 Release 地址：
 
-https://github.com/zhouhaoyiu/quake-report/releases/tag/oneclick-20260710
+https://github.com/zhouhaoyiu/quake-report/releases/tag/oneclick-20260715
 
 ## 选择下载哪个包
 
 | 机器 | 下载文件 | 是否需要外网 |
 | --- | --- | --- |
-| macOS Apple Silicon / M 系列芯片 | `quake-report-offline-macos-arm64-20260710.tar.gz` | 不需要 |
-| Windows x64 | `quake-report-online-windows-x64-20260710.zip` | 首次启动及目录同步需要 |
-| Linux x64 | `quake-report-online-linux-x64-20260710.tar.gz` | 首次启动及目录同步需要 |
+| macOS Apple Silicon / M 系列芯片 | `quake-report-offline-macos-arm64-20260715.tar.gz` | 不需要 |
+| Windows x64 | `quake-report-online-windows-x64-20260715.zip` | 首次启动及目录同步需要 |
+| Linux x64 | `quake-report-online-linux-x64-20260715.tar.gz` | 首次启动及目录同步需要 |
 
 三个包都包含当前代码、Natural Earth、国内边界、GEM 断层数据、`var/usgs_catalog.sqlite` 和 `var/usgs_catalog_m3.csv.gz`。macOS 离线包另外包含完整 Node/Python 运行环境和 LibreOffice。
 
@@ -18,11 +18,11 @@ https://github.com/zhouhaoyiu/quake-report/releases/tag/oneclick-20260710
 
 适用于 M1、M2、M3、M4 等 Apple Silicon Mac。
 
-1. 下载 `quake-report-offline-macos-arm64-20260710.tar.gz`。
+1. 下载 `quake-report-offline-macos-arm64-20260715.tar.gz`。
 2. 双击解压，或在终端运行：
 
    ```bash
-   tar -xzf quake-report-offline-macos-arm64-20260710.tar.gz
+   tar -xzf quake-report-offline-macos-arm64-20260715.tar.gz
    ```
 
 3. 进入解压出来的文件夹。
@@ -40,7 +40,7 @@ https://github.com/zhouhaoyiu/quake-report/releases/tag/oneclick-20260710
 
 适用于普通 64 位 Windows 电脑。
 
-1. 下载 `quake-report-online-windows-x64-20260710.zip`。
+1. 下载 `quake-report-online-windows-x64-20260715.zip`。
 2. 解压到一个英文路径目录，避免放在微信临时目录或压缩包预览窗口里直接运行。
 3. 进入解压出来的文件夹。
 4. 双击 `START-WINDOWS.bat`。
@@ -57,17 +57,17 @@ https://github.com/zhouhaoyiu/quake-report/releases/tag/oneclick-20260710
 
 适用于普通 64 位 Linux 服务器或桌面。
 
-1. 下载 `quake-report-online-linux-x64-20260710.tar.gz`。
+1. 下载 `quake-report-online-linux-x64-20260715.tar.gz`。
 2. 解压：
 
    ```bash
-   tar -xzf quake-report-online-linux-x64-20260710.tar.gz
+   tar -xzf quake-report-online-linux-x64-20260715.tar.gz
    ```
 
 3. 进入目录：
 
    ```bash
-   cd quake-report-online-linux-x64-20260710
+   cd quake-report-online-linux-x64-20260715
    ```
 
 4. 启动：
