@@ -18,7 +18,7 @@ import json
 from pathlib import Path
 from datetime import datetime
 from functools import lru_cache
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 import matplotlib
 matplotlib.use("Agg")
@@ -27,7 +27,6 @@ import matplotlib.patheffects as path_effects
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 from matplotlib.lines import Line2D
 
 import cartopy
@@ -36,8 +35,11 @@ import cartopy.feature as cfeature
 from cartopy.io import shapereader
 import shapefile
 
-from .usgs_client import MainShock, CatalogQuery
 from .fault_loader import load_faults_in_bbox
+
+if TYPE_CHECKING:
+    import pandas as pd
+    from .usgs_client import MainShock, CatalogQuery
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 LOCAL_CARTOPY_DATA = PROJECT_ROOT / "data/cartopy"
@@ -52,7 +54,7 @@ LAND_COLOR = "#f8e3c4"
 OCEAN_COLOR = "#abc7df"
 
 # ----------------------------------------------------------------------------
-# 中文字体注册
+# 中英文字体注册：拉丁字符优先 Times New Roman，中文回退 SimSun
 # ----------------------------------------------------------------------------
 _FONT_REGISTERED = False
 _FONT_PROP = None
@@ -64,6 +66,10 @@ def _ensure_font():
     if _FONT_REGISTERED:
         return
     for p in [
+        "/System/Library/Fonts/Supplemental/Times New Roman.ttf",
+        "/System/Library/Fonts/Supplemental/Times New Roman Bold.ttf",
+        "/System/Library/Fonts/Supplemental/Times New Roman Italic.ttf",
+        "/System/Library/Fonts/Supplemental/Times New Roman Bold Italic.ttf",
         str(Path.home() / "Library/Fonts/simsun.ttc"),
         "/usr/local/share/fonts/quake-report/simsun.ttc",
         "/System/Library/Fonts/PingFang.ttc",
@@ -93,17 +99,17 @@ def _ensure_font():
             except Exception:
                 pass
     preferred = [
-        "SimSun",
+        "Times New Roman", "SimSun", "Songti SC", "STSong",
         "PingFang SC", "STHeiti",
         "Source Han Sans SC", "Noto Sans CJK SC", "Noto Sans SC",
         "WenQuanYi Micro Hei", "WenQuanYi Zen Hei", "Heiti SC",
-        "Hiragino Sans GB", "Arial Unicode MS", "DejaVu Sans",
+        "Hiragino Sans GB", "Arial Unicode MS", "DejaVu Serif", "DejaVu Sans",
     ]
     available = {f.name for f in fm.fontManager.ttflist}
-    families = [name for name in preferred if name in available] or ["DejaVu Sans"]
-    plt.rcParams["font.family"] = "sans-serif"
+    families = [name for name in preferred if name in available] or ["DejaVu Serif"]
+    plt.rcParams["font.family"] = families
     plt.rcParams["font.sans-serif"] = families
-    plt.rcParams["font.serif"] = ["SimSun", "Noto Serif SC", "DejaVu Serif"]
+    plt.rcParams["font.serif"] = families
     plt.rcParams["axes.unicode_minus"] = False
     _FONT_PROP = fm.FontProperties(family=families)
     _FONT_PROP_BOLD = fm.FontProperties(family=families, weight="bold")
@@ -113,6 +119,12 @@ def _ensure_font():
 def _map_font(bold: bool = False):
     _ensure_font()
     return _FONT_PROP_BOLD if bold else _FONT_PROP
+
+
+def _pandas():
+    import pandas as pd
+
+    return pd
 
 
 # 震级 → 圆点大小（pt²）与边框颜色
@@ -151,6 +163,7 @@ def _expand_bbox_for_points(
     margin_ratio: float = 0.10,
 ) -> tuple[float, float, float, float]:
     """Expand the visual map extent so plotted points do not sit on the frame."""
+    pd = _pandas()
     min_lon, max_lon, min_lat, max_lat = bbox
     if not points.empty:
         lon = pd.to_numeric(points.get("longitude"), errors="coerce").dropna()
@@ -196,6 +209,7 @@ def render_distribution_map(
         output_path（同一参数）
     """
     _ensure_font()
+    pd = _pandas()
 
     lat0, lon0 = mainshock.latitude, mainshock.longitude
     radius_km = query.max_radius_km
@@ -228,7 +242,9 @@ def render_distribution_map(
 
     # ---- 断层线（GEM） ----
     try:
-        faults = load_faults_in_bbox(min_lon, max_lon, min_lat, max_lat)
+        faults = load_faults_in_bbox(
+            min_lon, max_lon, min_lat, max_lat, include_attributes=False,
+        )
         for f in faults:
             if len(f.points) >= 2:
                 xs, ys = zip(*f.points)
@@ -315,18 +331,40 @@ def render_distribution_map(
 
 def _draw_map_footer(fig, ax, min_lon, max_lon, min_lat, max_lat):
     box = ax.get_position()
-    footer_y = max(0.048, box.y0 - 0.045)
+    # 页脚贴近图框底部，避免与地图主体间距过大
+    footer_y = max(0.055, box.y0 - 0.045)
     today = datetime.now().strftime("%Y年%m月%d日")
-    _draw_scale_bar(fig, box, min_lon, max_lon, min_lat, max_lat, footer_y)
-    fig.text(box.x0, footer_y, f"产出单位：{MAP_OUTPUT_UNIT}",
+    scale_x0 = _draw_scale_bar(fig, box, min_lon, max_lon, min_lat, max_lat, footer_y)
+    unit_text = fig.text(box.x0, footer_y, f"产出单位：{MAP_OUTPUT_UNIT}",
              ha="left", va="baseline", fontsize=8.5, color="#333",
              fontproperties=_map_font())
-    fig.text(box.x0 + box.width * 0.65, footer_y, today,
-             ha="center", va="baseline", fontsize=8.5, color="#333",
+    # 实测单位文本宽度，用于避让与折行判断
+    unit_right = box.x0 + 0.40
+    try:
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        inv = fig.transFigure.inverted()
+        unit_right = inv.transform(unit_text.get_window_extent(renderer=renderer))[1][0]
+    except Exception:
+        renderer = inv = None
+    # 日期右端：优先避让比例尺；同时不得小于单位右缘 + 间距，防止重叠
+    date_x = min(scale_x0, box.x1 - 0.08) - 0.02
+    date_x = max(date_x, unit_right + 0.02)
+    date_text = fig.text(date_x, footer_y, today,
+             ha="right", va="baseline", fontsize=8.5, color="#333",
              fontproperties=_map_font())
+    # 小视野下比例尺过宽、右侧空间不足时，日期折行到页脚下一行
+    if renderer is not None:
+        try:
+            date_left = inv.transform(date_text.get_window_extent(renderer=renderer))[0][0]
+            if date_left < unit_right + 0.02:
+                date_text.set_position((min(scale_x0, box.x1 - 0.08) - 0.02, footer_y - 0.03))
+        except Exception:
+            pass
 
 
 def _catalog_for_map_display(catalog: pd.DataFrame, min_mag: float | None = None) -> pd.DataFrame:
+    pd = _pandas()
     if catalog.empty:
         return catalog.copy()
     df = catalog.copy()
@@ -377,6 +415,7 @@ def _draw_scale_bar(fig, box, min_lon, max_lon, min_lat, max_lat, footer_y):
         ha="center", va="baseline", fontsize=8.5, color=line_color,
         fontproperties=_map_font(), zorder=92,
     )
+    return x0
 
 
 def _intersects_bbox(a, b) -> bool:
@@ -386,34 +425,31 @@ def _intersects_bbox(a, b) -> bool:
 def _is_near_china_official_area(lon: float, lat: float) -> bool:
     if not _intersects_bbox((lon, lon, lat, lat), CHINA_BBOX):
         return False
-    area = _china_official_area()
-    if area is None:
+    areas = _china_official_geometries()
+    if not areas:
         return False
     try:
         from shapely.geometry import Point
 
         point = Point(lon, lat)
-        return bool(area.covers(point) or area.distance(point) <= 0.6)
+        return any(area.covers(point) or area.distance(point) <= 0.6 for area in areas)
     except Exception:
         return False
 
 
 @lru_cache(maxsize=1)
-def _china_official_area():
+def _china_official_geometries():
     if not TIANDITU_CHINA_GEOJSON.exists():
-        return None
+        return tuple()
     try:
         from shapely.geometry import shape
-        from shapely.ops import unary_union
-
-        geoms = [
+        return tuple(
             shape(feature["geometry"])
             for feature in _load_tianditu_china_geojson().get("features", [])
             if feature.get("geometry")
-        ]
-        return unary_union(geoms) if geoms else None
+        )
     except Exception:
-        return None
+        return tuple()
 
 
 def _china_boundary_files() -> list[Path]:
@@ -424,6 +460,20 @@ def _china_boundary_files() -> list[Path]:
 
 
 def _draw_china_official_boundaries(ax, min_lon, max_lon, min_lat, max_lat, proj):
+    target_bbox = (min_lon, max_lon, min_lat, max_lat)
+    if not _intersects_bbox(target_bbox, CHINA_BBOX):
+        return
+    official_geometries = _china_official_geometries()
+    if official_geometries:
+        try:
+            from shapely.geometry import box
+
+            viewport = box(min_lon, min_lat, max_lon, max_lat)
+            if not any(geometry.intersects(viewport) for geometry in official_geometries):
+                return
+        except Exception:
+            pass
+
     shp_files = [p for p in _china_boundary_files() if p.exists()]
     if not shp_files and TIANDITU_CHINA_GEOJSON.exists():
         _draw_china_tianditu_geojson(ax, min_lon, max_lon, min_lat, max_lat, proj)
@@ -434,12 +484,18 @@ def _draw_china_official_boundaries(ax, min_lon, max_lon, min_lat, max_lat, proj
             "1:100万公众版基础地理信息数据（2021）的 BOUL*.shp 放到 data/china_boundaries/，"
             "或放入天地图行政区划 GeoJSON 缓存。"
         )
+    reader_bbox = (min_lon, min_lat, max_lon, max_lat)
     for shp_path in shp_files:
         reader = shapefile.Reader(str(shp_path), encoding="gbk", encodingErrors="replace")
+        source_bbox = (reader.bbox[0], reader.bbox[2], reader.bbox[1], reader.bbox[3])
+        if not _intersects_bbox(source_bbox, target_bbox):
+            reader.close()
+            continue
         fields = [f[0] for f in reader.fields[1:]]
-        for shape, record in zip(reader.shapes(), reader.records()):
+        for shape_record in reader.iterShapeRecords(bbox=reader_bbox):
+            shape, record = shape_record.shape, shape_record.record
             if not _intersects_bbox((shape.bbox[0], shape.bbox[2], shape.bbox[1], shape.bbox[3]),
-                                    (min_lon, max_lon, min_lat, max_lat)):
+                                    target_bbox):
                 continue
             attrs = dict(zip(fields, record))
             code = str(attrs.get("GB") or attrs.get("gb") or attrs.get("CODE") or attrs.get("code") or "")
@@ -458,12 +514,12 @@ def _draw_china_official_boundaries(ax, min_lon, max_lon, min_lat, max_lat, proj
 def _china_boundary_style(code: str) -> tuple[str, float, float]:
     # ponytail: BOUL code prefixes are enough for map hierarchy; add a code table if labels are needed.
     if code.startswith("63"):
-        return "#242424", 1.25, 0.98
+        return "#555d59", 0.85, 0.84
     if code.startswith("64"):
-        return "#2f2f2f", 1.05, 0.95
+        return "#737a76", 0.65, 0.72
     if code.startswith("65"):
-        return "#8a8175", 0.42, 0.58
-    return "#5f5a52", 0.55, 0.72
+        return "#a4aaa6", 0.30, 0.52
+    return "#8c928e", 0.40, 0.60
 
 
 def _draw_china_tianditu_geojson(ax, min_lon, max_lon, min_lat, max_lat, proj):
@@ -478,7 +534,7 @@ def _draw_china_tianditu_geojson(ax, min_lon, max_lon, min_lat, max_lat, proj):
             xs, ys = zip(*ring)
             if not _intersects_bbox((min(xs), max(xs), min(ys), max(ys)), target_bbox):
                 continue
-            ax.plot(xs, ys, color="#4f4a43", linewidth=0.75,
+            ax.plot(xs, ys, color="#747b77", linewidth=0.50, alpha=0.68,
                     linestyle="-", transform=proj, zorder=1.4)
     _draw_tianditu_outer_boundary(ax, target_bbox, proj)
 
@@ -514,8 +570,8 @@ def _draw_tianditu_outer_boundary(ax, target_bbox, proj):
         xs, ys = line.xy
         if not _intersects_bbox((min(xs), max(xs), min(ys), max(ys)), target_bbox):
             continue
-        ax.plot(xs, ys, color="#222222", linewidth=1.25, linestyle="-",
-                transform=proj, zorder=1.8)
+        ax.plot(xs, ys, color="#555d59", linewidth=0.85, alpha=0.84,
+                linestyle="-", transform=proj, zorder=1.8)
 
 
 def _iter_lines(geom):
@@ -617,8 +673,8 @@ def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 def _draw_city_label(ax, lon: float, lat: float, name: str, proj):
-    ax.scatter(lon, lat, s=12, marker="s", c="#222222", edgecolors="white",
-               linewidths=0.35, transform=proj, zorder=6)
+    ax.scatter(lon, lat, s=12, marker="o", c="white", edgecolors="#555d59",
+               linewidths=0.45, transform=proj, zorder=6)
     ax.text(
         lon, lat, f" {name}", fontsize=7.2, color="#222222",
         ha="left", va="bottom", transform=proj, zorder=6.5,
@@ -779,6 +835,7 @@ def _size_to_marker(s: float) -> float:
 
 
 def _self_check_map_catalog():
+    pd = _pandas()
     df = pd.DataFrame({
         "longitude": np.linspace(70, 71, 1800),
         "latitude": np.linspace(36, 37, 1800),

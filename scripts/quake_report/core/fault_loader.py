@@ -45,6 +45,8 @@ def load_faults_in_bbox(
     min_lat: float,
     max_lat: float,
     shp_path: str = DEFAULT_SHP,
+    *,
+    include_attributes: bool = True,
 ) -> List[FaultSegment]:
     """加载 bbox 范围内的断层段。
 
@@ -53,7 +55,13 @@ def load_faults_in_bbox(
     if not os.path.exists(shp_path):
         return []
 
-    records = _load_fault_records(shp_path, os.path.getmtime(shp_path))
+    reader_bbox = (min_lon, min_lat, max_lon, max_lat)
+    records = _load_fault_records(
+        shp_path,
+        os.path.getmtime(shp_path),
+        include_attributes,
+        reader_bbox,
+    )
     segments: List[FaultSegment] = []
 
     for sb, pts, name, slip in records:
@@ -79,20 +87,31 @@ def load_faults_in_bbox(
     return segments
 
 
-@lru_cache(maxsize=4)
-def _load_fault_records(shp_path: str, mtime: float):
-    sf = shapefile.Reader(shp_path)
+@lru_cache(maxsize=8)
+def _load_fault_records(
+    shp_path: str,
+    mtime: float,
+    include_attributes: bool,
+    reader_bbox: tuple[float, float, float, float],
+):
     rows = []
-    for shape, record in zip(sf.shapes(), sf.records()):
-        pts = shape.points
-        if not pts:
-            continue
-        try:
-            name = record["name"] or ""
-            slip = record["slip_type"] or ""
-        except (IndexError, KeyError):
-            name, slip = "", ""
-        rows.append((tuple(shape.bbox), tuple(pts), name, slip))
+    if include_attributes:
+        sf = shapefile.Reader(shp_path)
+        for shape_record in sf.iterShapeRecords(bbox=reader_bbox):
+            shape, record = shape_record.shape, shape_record.record
+            if not shape.points:
+                continue
+            try:
+                name = record["name"] or ""
+                slip = record["slip_type"] or ""
+            except (IndexError, KeyError):
+                name, slip = "", ""
+            rows.append((tuple(shape.bbox), tuple(shape.points), name, slip))
+    else:
+        sf = shapefile.Reader(shp=shp_path)
+        for shape in sf.iterShapes(bbox=reader_bbox):
+            if shape.points:
+                rows.append((tuple(shape.bbox), tuple(shape.points), "", ""))
     sf.close()
     return tuple(rows)
 
