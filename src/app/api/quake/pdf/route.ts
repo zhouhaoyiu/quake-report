@@ -19,7 +19,15 @@ export async function POST(req: NextRequest) {
       return tooLarge();
     }
 
-    const body = await req.json();
+    let body: { fileName?: string; docxFileId?: string; docxDataUrl?: string };
+    try {
+      body = (await req.json()) as typeof body;
+    } catch {
+      return NextResponse.json(
+        { ok: false, error: "请求体必须是合法 JSON" },
+        { status: 400 },
+      );
+    }
     const fileName = safeBaseName(String(body.fileName || "report.docx")).replace(/\.docx$/i, ".pdf");
 
     const docx = path.join(dir, fileName.replace(/\.pdf$/i, ".docx"));

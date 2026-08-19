@@ -123,7 +123,15 @@ export async function POST(req: NextRequest) {
         { status: 429, headers: { "Retry-After": String(retryAfter) } },
       );
     }
-    const body = (await req.json()) as GenerationRequest;
+    let body: GenerationRequest;
+    try {
+      body = (await req.json()) as GenerationRequest;
+    } catch {
+      return NextResponse.json(
+        { ok: false, error: "请求体必须是合法 JSON" },
+        { status: 400 },
+      );
+    }
     const {
       mode = "manual",
       lat, lon, mag, time, depth, place, magType, sourceText,

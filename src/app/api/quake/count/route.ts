@@ -57,7 +57,15 @@ const countCache = getGlobalValue("__quakeCountCache", () =>
 
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json()) as CountRequest;
+    let body: CountRequest;
+    try {
+      body = (await req.json()) as CountRequest;
+    } catch {
+      return NextResponse.json(
+        { ok: false, error: "请求体必须是合法 JSON" },
+        { status: 400 },
+      );
+    }
     let { lat, lon, time } = body;
     const { mode = "manual", eventId, radiusKm = 200, minMag = 3.0, startTime, endTime } = body;
     const requestKey = JSON.stringify({ mode, eventId, lat, lon, time, radiusKm, minMag, startTime, endTime });
