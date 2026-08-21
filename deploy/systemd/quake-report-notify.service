@@ -1,0 +1,7 @@
+[Unit]
+Description=Quake report notify sender
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/quake-runtime/conda/bin/python /opt/quake-report-cache/notify_send.py

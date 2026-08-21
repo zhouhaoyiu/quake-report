@@ -253,6 +253,7 @@ export async function POST(req: NextRequest) {
     try {
       const payload = buildResultPayload(item, !noPdf);
       setGenerationCache(cacheKey, payload);
+      enqueueNotify(payload).catch(() => {});
       return NextResponse.json(payload);
     } finally {
       await cleanupOutput(outputDir);
@@ -267,6 +268,21 @@ export async function POST(req: NextRequest) {
 
 function generationCacheKey(value: Record<string, unknown>) {
   return createHash("sha1").update(JSON.stringify(value)).digest("hex");
+}
+
+/**
+ * 生成成功后写入通知队列（追加一行 JSON）。
+ * 由服务器侧 notify_send 脚本轮询队列并通过 SMTP 发送邮件，
+ * 本函数失败不影响生成响应。
+ */
+async function enqueueNotify(payload: GenerationResult) {
+  const queue = process.env.QUAKE_NOTIFY_QUEUE || "/opt/quake-report-cache/notify-queue.jsonl";
+  const entry = {
+    ts: new Date().toISOString(),
+    mainshock: payload.mainshock ?? null,
+    fileNames: payload.fileNames ?? null,
+  };
+  await fs.appendFile(queue, `${JSON.stringify(entry)}\n`, { encoding: "utf8" });
 }
 
 function normalizeReportLevel(value: unknown) {
