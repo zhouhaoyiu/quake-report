@@ -276,13 +276,17 @@ function generationCacheKey(value: Record<string, unknown>) {
  * 本函数失败不影响生成响应。
  */
 async function enqueueNotify(payload: GenerationResult) {
-  const queue = process.env.QUAKE_NOTIFY_QUEUE || "/opt/quake-report-cache/notify-queue.jsonl";
-  const entry = {
-    ts: new Date().toISOString(),
-    mainshock: payload.mainshock ?? null,
-    fileNames: payload.fileNames ?? null,
-  };
-  await fs.appendFile(queue, `${JSON.stringify(entry)}\n`, { encoding: "utf8" });
+  try {
+    const queue = process.env.QUAKE_NOTIFY_QUEUE || "/opt/quake-report-cache/notify-queue.jsonl";
+    const entry = {
+      ts: new Date().toISOString(),
+      mainshock: payload.mainshock ?? null,
+      fileNames: payload.fileNames ?? null,
+    };
+    await fs.appendFile(queue, `${JSON.stringify(entry)}\n`, { encoding: "utf8" });
+  } catch (e) {
+    console.error("[notify] 通知队列写入失败:", e);
+  }
 }
 
 function normalizeReportLevel(value: unknown) {
@@ -478,6 +482,7 @@ function streamPython(script: string, args: string[], jsonPath: string, outputDi
             if (!item) throw new Error("未获取到生成摘要");
             const result = buildResultPayload(item, canPdf);
             setGenerationCache(cacheKey, result);
+            enqueueNotify(result).catch(() => {});
             await finish({
               type: "done",
               progress: 100,
